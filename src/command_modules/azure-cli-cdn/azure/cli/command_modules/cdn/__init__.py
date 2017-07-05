@@ -5,10 +5,24 @@
 # pylint: disable=unused-import
 import azure.cli.command_modules.cdn._help
 
+from azure.cli.core import AzCommandsLoader
 
-def load_params(_):
-    import azure.cli.command_modules.cdn._params  # pylint: disable=redefined-outer-name, unused-variable
+class CdnCommandsLoader(AzCommandsLoader):
+
+    def __init__(self, ctx=None):
+        super(CdnCommandsLoader, self).__init__(ctx=ctx)
+        self.module_name = __name__
+        self.min_api = '2017-03-10-profile'
 
 
-def load_commands():
-    import azure.cli.command_modules.cdn.commands  # pylint: disable=redefined-outer-name, unused-variable
+    def load_command_table(self, args):
+        from azure.cli.command_modules.cdn.commands import load_command_table
+        super(CdnCommandsLoader, self).load_command_table(args)
+        load_command_table(self, args)
+        return self.command_table
+
+
+    def load_arguments(self, command):
+        from azure.cli.command_modules.cdn._params import load_arguments
+        load_arguments(self, command)
+        super(CdnCommandsLoader, self).load_arguments(command)

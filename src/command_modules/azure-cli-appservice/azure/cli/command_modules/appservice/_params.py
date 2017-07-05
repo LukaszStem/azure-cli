@@ -7,8 +7,13 @@ from argcomplete.completers import FilesCompleter
 
 from azure.cli.core.commands import register_cli_argument
 from azure.cli.core.commands.parameters import (resource_group_name_type, location_type,
-                                                get_resource_name_completion_list, file_type,
-                                                CliArgumentType, ignore_type, enum_choice_list)
+                                                get_resource_name_completion_list, file_type)
+from azure.mgmt.web.models import DatabaseType, ConnectionStringType
+
+from knack.arguments import (CLIArgumentType, ignore_type, enum_choice_list,
+                             get_resource_name_completion_list, file_type,
+                             CliArgumentType, ignore_type, enum_choice_list)
+
 from azure.mgmt.web.models import DatabaseType, ConnectionStringType, BuiltInAuthenticationProvider
 from ._client_factory import web_client_factory
 from ._validators import validate_existing_function_app, validate_existing_web_app

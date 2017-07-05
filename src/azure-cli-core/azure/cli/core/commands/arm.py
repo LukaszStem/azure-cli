@@ -7,21 +7,21 @@ import argparse
 import re
 from six import string_types
 
-from azure.cli.core.commands import (CliCommand,
-                                     get_op_handler,
-                                     command_table as main_command_table,
-                                     command_module_map as main_command_module_map,
-                                     CONFIRM_PARAM_NAME)
-from azure.cli.core.commands._introspection import extract_args_from_signature
+from azure.cli.core import AzCliCommand
+from azure.cli.core import CONFIRM_PARAM_NAME
 from azure.cli.core.commands.client_factory import get_mgmt_service_client
-from azure.cli.core.application import APPLICATION, IterateValue
-from azure.cli.core.prompting import prompt_y_n, NoTTYException
-from azure.cli.core._config import az_config
-import azure.cli.core.azlogging as azlogging
-from azure.cli.core.util import CLIError, todict, shell_safe_json_parse
+from azure.cli.core.commands.validators import IterateValue
+from azure.cli.core.util import shell_safe_json_parse
 from azure.cli.core.profiles import ResourceType
 
-logger = azlogging.get_az_logger(__name__)
+from knack.commands import CLICommandsLoader
+from knack.events import EVENT_CMDLOADER_LOAD_ARGUMENTS, EVENT_INVOKER_CMD_TBL_LOADED
+from knack.introspection import extract_args_from_signature
+from knack.log import get_logger
+from knack.prompting import prompt_y_n, NoTTYException
+from knack.util import todict, CLIError
+
+logger = get_logger(__name__)
 
 regex = re.compile(
     '/subscriptions/(?P<subscription>[^/]*)(/resource[gG]roups/(?P<resource_group>[^/]*))?'
@@ -206,7 +206,13 @@ def resource_exists(resource_group, name, namespace, type, **_):  # pylint: disa
     return existing
 
 
-def add_id_parameters(command_table):
+def add_id_parameters(_, **kwargs):  # pylint: disable=unused-argument
+
+    command_table = kwargs.get('cmd_tbl')
+
+    if not command_table:
+        return
+
     def split_action(arguments):
         class SplitAction(argparse.Action):  # pylint: disable=too-few-public-methods
             def __call__(self, parser, namespace, values, option_string=None):
@@ -219,7 +225,7 @@ def add_id_parameters(command_table):
                 try:
                     for value in [values] if isinstance(values, str) else values:
                         parts = parse_resource_id(value)
-                        for arg in [arg for arg in arguments.values() if arg.id_part]:
+                        for arg in [arg for arg in arguments.values() if arg.type.settings.get('id_part')]:
                             self.set_argument_value(namespace, arg, parts)
                 except Exception as ex:
                     raise ValueError(ex)
@@ -229,22 +235,22 @@ def add_id_parameters(command_table):
                 existing_values = getattr(namespace, arg.name, None)
                 if existing_values is None:
                     existing_values = IterateValue()
-                    existing_values.append(parts[arg.id_part])
+                    existing_values.append(parts[arg.type.settings['id_part']])
                 else:
                     if isinstance(existing_values, str):
                         if not getattr(arg.type, 'configured_default_applied', None):
                             logger.warning(
                                 "Property '%s=%s' being overriden by value '%s' from IDs parameter.",
-                                arg.name, existing_values, parts[arg.id_part]
+                                arg.name, existing_values, parts[arg.type.settings['id_part']]
                             )
                         existing_values = IterateValue()
-                    existing_values.append(parts[arg.id_part])
+                    existing_values.append(parts[arg.type.settings['id_part']])
                 setattr(namespace, arg.name, existing_values)
 
         return SplitAction
 
     def command_loaded_handler(command):
-        id_parts = [arg.id_part for arg in command.arguments.values() if arg.id_part]
+        id_parts = [arg.type.settings['id_part'] for arg in command.arguments.values() if arg.type.settings.get('id_part')]
         if 'name' not in id_parts and 'resource_name' not in id_parts:
             # Only commands with a resource name are candidates for an id parameter
             return
@@ -255,7 +261,7 @@ def add_id_parameters(command_table):
 
         required_arguments = []
         optional_arguments = []
-        for arg in [argument for argument in command.arguments.values() if argument.id_part]:
+        for arg in [argument for argument in command.arguments.values() if argument.type.settings.get('id_part')]:
             if arg.options.get('required', False):
                 required_arguments.append(arg)
             else:
@@ -272,7 +278,7 @@ def add_id_parameters(command_table):
 
         group_name = 'Resource Id'
         for key, arg in command.arguments.items():
-            if command.arguments[key].id_part:
+            if command.arguments[key].type.settings.get('id_part'):
                 command.arguments[key].arg_group = group_name
 
         command.add_argument('ids',
@@ -290,11 +296,6 @@ def add_id_parameters(command_table):
     for command in command_table.values():
         command_loaded_handler(command)
 
-
-APPLICATION.register(APPLICATION.COMMAND_TABLE_PARAMS_LOADED, add_id_parameters)
-
-APPLICATION.register(APPLICATION.COMMAND_TABLE_LOADED, add_id_parameters)
-
 add_usage = '--add property.listProperty <key=value, string or JSON string>'
 set_usage = '--set property1.property2=<value>'
 remove_usage = '--remove property.list <indexToRemove> OR --remove propertyToRemove'
@@ -310,20 +311,7 @@ def _get_child(parent, collection_name, item_name, collection_key):
     else:
         return result
 
-
-def _user_confirmed(confirmation, command_args):
-    if callable(confirmation):
-        return confirmation(command_args)
-    try:
-        if isinstance(confirmation, string_types):
-            return prompt_y_n(confirmation)
-        return prompt_y_n('Are you sure you want to perform this operation?')
-    except NoTTYException:
-        logger.warning('Unable to prompt for confirmation as no tty available. Use --yes.')
-        return False
-
-
-def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=None,
+def cli_generic_update_command(context, module_name, name, getter_op, setter_op, factory=None,
                                setter_arg_name='parameters', table_transformer=None,
                                child_collection_prop_name=None, child_collection_key='name',
                                child_arg_name='item_name', custom_function_op=None,
@@ -338,14 +326,14 @@ def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=
             custom_function_op))
 
     def get_arguments_loader():
-        return dict(extract_args_from_signature(get_op_handler(getter_op)))
+        return dict(extract_args_from_signature(context.get_op_handler(getter_op)))
 
     def set_arguments_loader():
-        return dict(extract_args_from_signature(get_op_handler(setter_op),
+        return dict(extract_args_from_signature(context.get_op_handler(setter_op),
                                                 no_wait_param=no_wait_param))
 
     def function_arguments_loader():
-        return dict(extract_args_from_signature(get_op_handler(custom_function_op))) \
+        return dict(extract_args_from_signature(context.get_op_handler(custom_function_op))) \
             if custom_function_op else {}
 
     def arguments_loader():
@@ -362,9 +350,11 @@ def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=
     def handler(args):  # pylint: disable=too-many-branches,too-many-statements
         from msrestazure.azure_operation import AzureOperationPoller
 
+        from azure.cli.core.commands import _user_confirmed
+
         if confirmation \
             and not args.items().get(CONFIRM_PARAM_NAME) \
-            and not az_config.getboolean('core', 'disable_confirm_prompt', fallback=False) \
+            and not context.config.getboolean('core', 'disable_confirm_prompt', fallback=False) \
                 and not _user_confirmed(confirmation, args.items()):
             raise CLIError('Operation cancelled.')
 
@@ -375,15 +365,15 @@ def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=
             del args[item]
 
         try:
-            client = factory() if factory else None
+            client = factory(context.ctx) if factory else None
         except TypeError:
-            client = factory(None) if factory else None
+            client = factory(context.ctx, None) if factory else None
 
         getterargs = {key: val for key, val in args.items() if key in get_arguments_loader()}
-        getter = get_op_handler(getter_op)
+        getter = context.get_op_handler(getter_op)
         try:
             if child_collection_prop_name:
-                parent = getter(client, **getterargs) if client else getter(**getterargs)
+                parent = getter(client=client, **getterargs) if client else getter(**getterargs)
                 instance = _get_child(
                     parent,
                     child_collection_prop_name,
@@ -396,13 +386,13 @@ def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=
 
             # pass instance to the custom_function, if provided
             if custom_function_op:
-                custom_function = get_op_handler(custom_function_op)
+                custom_function = context.get_op_handler(custom_function_op)
                 custom_func_args = \
                     {k: v for k, v in args.items() if k in function_arguments_loader()}
                 if child_collection_prop_name:
-                    parent = custom_function(instance, parent, **custom_func_args)
+                    parent = custom_function(instance=instance, parent=parent, **custom_func_args)
                 else:
-                    instance = custom_function(instance, **custom_func_args)
+                    instance = custom_function(instance=instance, **custom_func_args)
 
             # apply generic updates after custom updates
             setterargs = {key: val for key, val in args.items() if key in set_arguments_loader()}
@@ -428,7 +418,7 @@ def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=
 
             # Done... update the instance!
             setterargs[setter_arg_name] = parent if child_collection_prop_name else instance
-            setter = get_op_handler(setter_op)
+            setter = context.get_op_handler(setter_op)
 
             opres = setter(client, **setterargs) if client else setter(**setterargs)
 
@@ -462,8 +452,8 @@ def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=
                 setattr(namespace, 'ordered_arguments', [])
             namespace.ordered_arguments.append((option_string, values))
 
-    cmd = CliCommand(name, handler, table_transformer=table_transformer,
-                     arguments_loader=arguments_loader, formatter_class=formatter_class)
+    cmd = AzCliCommand(context.ctx, name, handler, table_transformer=table_transformer,
+                       arguments_loader=arguments_loader, formatter_class=formatter_class)
     group_name = 'Generic Update'
     cmd.add_argument('properties_to_set', '--set', nargs='+', action=OrderedArgsAction, default=[],
                      help='Update an object by specifying a property path and value to set.'
@@ -477,17 +467,17 @@ def cli_generic_update_command(module_name, name, getter_op, setter_op, factory=
                      default=[], help='Remove a property or an element from a list.  Example: '
                      '{}'.format(remove_usage), metavar='LIST INDEX',
                      arg_group=group_name)
-    main_command_table[name] = cmd
-    main_command_module_map[name] = module_name
+    context.command_table[name] = cmd
+    context._command_module_map[name] = module_name
 
 
-def cli_generic_wait_command(module_name, name, getter_op, factory=None, exception_handler=None):
+def cli_generic_wait_command(context, module_name, name, getter_op, factory=None, exception_handler=None):
 
     if not isinstance(getter_op, string_types):
         raise ValueError("Getter operation must be a string. Got '{}'".format(type(getter_op)))
 
     def get_arguments_loader():
-        return dict(extract_args_from_signature(get_op_handler(getter_op)))
+        return dict(extract_args_from_signature(context.get_op_handler(getter_op)))
 
     def arguments_loader():
         arguments = {}
@@ -513,14 +503,14 @@ def cli_generic_wait_command(module_name, name, getter_op, factory=None, excepti
         from msrest.exceptions import ClientException
         import time
         try:
-            client = factory() if factory else None
+            client = factory(context.ctx) if factory else None
         except TypeError:
-            client = factory(None) if factory else None
+            client = factory(context.ctx, None) if factory else None
 
         getterargs = {key: val for key, val in args.items()
                       if key in get_arguments_loader()}
 
-        getter = get_op_handler(getter_op)
+        getter = context.get_op_handler(getter_op)
 
         timeout = args.pop('timeout')
         interval = args.pop('interval')
@@ -563,7 +553,7 @@ def cli_generic_wait_command(module_name, name, getter_op, factory=None, excepti
 
         return CLIError('Wait operation timed-out after {} seconds'.format(timeout))
 
-    cmd = CliCommand(name, handler, arguments_loader=arguments_loader)
+    cmd = AzCliCommand(context.ctx, name, handler, arguments_loader=arguments_loader)
     group_name = 'Wait Condition'
     cmd.add_argument('timeout', '--timeout', default=3600, arg_group=group_name, type=int,
                      help='maximum wait in seconds')
@@ -581,8 +571,8 @@ def cli_generic_wait_command(module_name, name, getter_op, factory=None, excepti
                      help=("Wait until the condition satisfies a custom JMESPath query. E.g. "
                            "provisioningState!='InProgress', "
                            "instanceView.statuses[?code=='PowerState/running']"))
-    main_command_table[name] = cmd
-    main_command_module_map[name] = module_name
+    context.command_table[name] = cmd
+    context._command_module_map[name] = module_name
 
 
 def verify_property(instance, condition):

@@ -29,7 +29,10 @@ logger = logging.getLogger('azure.cli.testsdk')
 class ScenarioTest(ReplayableTest):
     def __init__(self, method_name, config_file=None, recording_name=None,
                  recording_processors=None, replay_processors=None, recording_patches=None, replay_patches=None):
+        from azure.cli.testsdk import TestCli
+        self.ctx = TestCli()
         self.name_replacer = GeneralNameReplacer()
+        self.kwargs = {}
         super(ScenarioTest, self).__init__(
             method_name,
             config_file=config_file,
@@ -56,7 +59,7 @@ class ScenarioTest(ReplayableTest):
                 patch_retrieve_token_for_user,
                 patch_progress_controller,
             ],
-            recording_dir=find_recording_dir(inspect.getfile(self.__class__)),
+            recording_dir=find_recording_dir(self.ctx, inspect.getfile(self.__class__)),
             recording_name=recording_name
         )
 
@@ -71,9 +74,8 @@ class ScenarioTest(ReplayableTest):
 
         return moniker
 
-    @classmethod
-    def cmd(cls, command, checks=None, expect_failure=False):
-        return execute(command, expect_failure=expect_failure).assert_with_checks(checks)
+    def cmd(self, command, checks=None, expect_failure=False):
+        return execute(self.ctx, command.format(**self.kwargs), expect_failure=expect_failure).assert_with_checks(checks)
 
     def get_subscription_id(self):
         if self.in_recording or self.is_live:
@@ -85,20 +87,20 @@ class ScenarioTest(ReplayableTest):
 
 @live_only()
 class LiveScenarioTest(IntegrationTestBase):
-    @classmethod
-    def cmd(cls, command, checks=None, expect_failure=False):
-        return execute(command, expect_failure=expect_failure).assert_with_checks(checks)
+
+    def cmd(self, command, checks=None, expect_failure=False):
+        return execute(self.ctx, command, expect_failure=expect_failure).assert_with_checks(checks)
 
 
 class ExecutionResult(object):
-    def __init__(self, command, expect_failure=False, in_process=True):
+    def __init__(self, cli_ctx, command, expect_failure=False, in_process=True):
         self.output = ''
         self.applog = ''
 
         if in_process:
-            self._in_process_execute(command, expect_failure=expect_failure)
+            self._in_process_execute(cli_ctx, command, expect_failure=expect_failure)
         else:
-            self._out_of_process_execute(command)
+            self._out_of_process_execute(cli_ctx, command)
 
         if expect_failure and self.exit_code == 0:
             logger.error('Command "%s" => %d. (It did not fail as expected) Output: %s. %s', command,
@@ -138,8 +140,7 @@ class ExecutionResult(object):
 
         return self.json_value
 
-    def _in_process_execute(self, command, expect_failure=False):
-        from azure.cli.main import main as cli_main
+    def _in_process_execute(self, cli_ctx, command, expect_failure=False):
         from six import StringIO
         from vcr.errors import CannotOverwriteExistingCassetteException
 
@@ -151,7 +152,7 @@ class ExecutionResult(object):
         try:
             # issue: stderr cannot be redirect in this form, as a result some failure information
             # is lost when command fails.
-            self.exit_code = cli_main(shlex.split(command), output=stdout_buf, logging_stream=logging_buf) or 0
+            self.exit_code = cli_ctx.invoke(shlex.split(command), out_file=stdout_buf) or 0
             self.output = stdout_buf.getvalue()
             self.applog = logging_buf.getvalue()
 

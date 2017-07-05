@@ -12,10 +12,10 @@ except ImportError:
 from json import loads
 import requests
 
-from azure.cli.core.util import CLIError
+from knack.util import CLIError
 
 
-def _get_login_token(login_server, only_refresh_token=True, repository=None):
+def _get_login_token(cli_ctx, login_server, only_refresh_token=True, repository=None):
     """Obtains refresh and access tokens for an AAD-enabled registry.
     :param str login_server: The registry login server URL to log in to
     :param bool only_refresh_token: Whether to ask for only refresh token,
@@ -43,7 +43,7 @@ def _get_login_token(login_server, only_refresh_token=True, repository=None):
     authhost = urlunparse((authurl[0], authurl[1], '/oauth2/exchange', '', '', ''))
 
     from azure.cli.core._profile import Profile
-    profile = Profile()
+    profile = Profile(cli_ctx)
     sp_id, refresh, access, tenant = profile.get_refresh_token()
 
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}

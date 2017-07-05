@@ -7,14 +7,23 @@ from azure.cli.testsdk import ScenarioTest, JMESPathCheck, ResourceGroupPreparer
 
 
 class RedisCacheTests(ScenarioTest):
-    @ResourceGroupPreparer()
-    def test_create_redis_cache(self, resource_group):
-        name = self.create_random_name(prefix='cli', length=24)
-        self.cmd('az redis create -n {} -g {} -l {} --sku {} --vm-size {}'.format(
-            name, resource_group, 'WestUS', 'Basic', 'C0'))
-        self.cmd('az redis show -n {} -g {}'.format(name, resource_group), checks=[
-            JMESPathCheck('name', name),
+
+    @ResourceGroupPreparer(name_prefix='cli_test_redis')
+    def test_redis_cache(self, resource_group):
+
+        name = self.create_random_name(prefix='redis', length=24)
+        self.kwargs = {
+            'rg': resource_group,
+            'loc': 'WestUS',
+            'name': name,
+            'sku': 'basic',
+            'size': 'C0'
+        }
+
+        self.cmd('az redis create -n {name} -g {rg} -l {loc} --sku {sku} --vm-size {size}')
+        self.cmd('az redis show -n {name} -g {rg}', checks=[
+            JMESPathCheck('name', self.kwargs['name']),
             JMESPathCheck('provisioningState', 'Creating')
         ])
-        self.cmd('az redis list -g {}'.format(resource_group))
-        self.cmd('az redis list-keys -n {} -g {}'.format(name, resource_group))
+        self.cmd('az redis list -g {rg}')
+        self.cmd('az redis list-keys -n {name} -g {rg}')

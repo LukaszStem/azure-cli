@@ -8,7 +8,8 @@ import adal
 
 from msrest.authentication import Authentication
 
-from azure.cli.core.util import CLIError, in_cloud_console
+from knack.util import CLIError
+from azure.cli.core.util import in_cloud_console
 
 
 class AdalAuthentication(Authentication):  # pylint: disable=too-few-public-methods

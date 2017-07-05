@@ -3,12 +3,28 @@
 # Licensed under the MIT License. See License.txt in the project root for license information.
 # --------------------------------------------------------------------------------------------
 
+from azure.cli.core import AzCommandsLoader
+from azure.cli.core.profiles import ResourceType
+
 import azure.cli.command_modules.resource._help  # pylint: disable=unused-import
 
 
-def load_params(_):
-    import azure.cli.command_modules.resource._params  # pylint: disable=redefined-outer-name, unused-variable
+class ResourceCommandsLoader(AzCommandsLoader):
+
+    def __init__(self, ctx=None):
+        super(ResourceCommandsLoader, self).__init__(ctx=ctx)
+        self.module_name = __name__
+        self.default_resource_type = ResourceType.MGMT_RESOURCE_RESOURCES
 
 
-def load_commands():
-    import azure.cli.command_modules.resource.commands  # pylint: disable=redefined-outer-name, unused-variable
+    def load_command_table(self, args):
+        from azure.cli.command_modules.resource.commands import load_command_table
+        super(ResourceCommandsLoader, self).load_command_table(args)
+        load_command_table(self, args)
+        return self.command_table
+
+
+    def load_arguments(self, command):
+        from azure.cli.command_modules.resource._params import load_arguments
+        load_arguments(self, command)
+        super(ResourceCommandsLoader, self).load_arguments(command)

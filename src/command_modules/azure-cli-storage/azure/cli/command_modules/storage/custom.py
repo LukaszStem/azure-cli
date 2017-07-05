@@ -8,29 +8,30 @@
 from __future__ import print_function
 
 from azure.cli.core.decorators import transfer_doc
-from azure.cli.core.util import CLIError
-from azure.cli.core.profiles import get_sdk, supported_api_version, ResourceType
-
+from azure.cli.core.profiles import ResourceType
 from azure.cli.command_modules.storage._factory import storage_client_factory
 from azure.cli.command_modules.storage.util import guess_content_type
-from azure.cli.core.application import APPLICATION
 
-Logging, Metrics, CorsRule, AccessPolicy, RetentionPolicy = get_sdk(ResourceType.DATA_STORAGE,
-                                                                    'Logging',
-                                                                    'Metrics',
-                                                                    'CorsRule',
-                                                                    'AccessPolicy',
-                                                                    'RetentionPolicy',
-                                                                    mod='models')
+from knack.util import CLIError
 
-BlockBlobService, BaseBlobService, FileService, FileProperties, DirectoryProperties, TableService, QueueService = \
-    get_sdk(ResourceType.DATA_STORAGE, 'blob#BlockBlobService', 'blob.baseblobservice#BaseBlobService',
-            'file#FileService', 'file.models#FileProperties', 'file.models#DirectoryProperties', 'table#TableService',
-            'queue#QueueService')
+def _get_standard_imports(cli_ctx):
+    raise CLIError('TODO: Update these merry old imports!')
+    Logging, Metrics, CorsRule, AccessPolicy, RetentionPolicy = get_sdk(ResourceType.DATA_STORAGE,
+                                                                        'Logging',
+                                                                        'Metrics',
+                                                                        'CorsRule',
+                                                                        'AccessPolicy',
+                                                                        'RetentionPolicy',
+                                                                        mod='models')
+
+    BlockBlobService, BaseBlobService, FileService, FileProperties, DirectoryProperties, TableService, QueueService = \
+        get_sdk(ResourceType.DATA_STORAGE, 'blob#BlockBlobService', 'blob.baseblobservice#BaseBlobService',
+                'file#FileService', 'file.models#FileProperties', 'file.models#DirectoryProperties', 'table#TableService',
+                'queue#QueueService')
 
 
 def _update_progress(current, total):
-    HOOK = APPLICATION.get_progress_controller(True)
+    HOOK = AZ_CLI.get_progress_controller(True)
 
     if total:
         HOOK.add(message='Alive', value=current, total_val=total)
@@ -44,6 +45,7 @@ def create_storage_account(resource_group_name, account_name, sku, location=None
                            custom_domain=None, encryption_services=None, access_tier=None, https_only=None,
                            bypass=None, default_action=None, assign_identity=False):
     StorageAccountCreateParameters, Kind, Sku, CustomDomain, AccessTier, Identity, Encryption, NetworkRuleSet = get_sdk(
+        cli_ctx,
         ResourceType.MGMT_STORAGE,
         'StorageAccountCreateParameters',
         'Kind',
@@ -76,8 +78,10 @@ def create_storage_account(resource_group_name, account_name, sku, location=None
     return scf.storage_accounts.create(resource_group_name, account_name, params)
 
 
-def create_storage_account_with_account_type(resource_group_name, account_name, account_type, location=None, tags=None):
+def create_storage_account_with_account_type(cli_ctx, resource_group_name, account_name, account_type,
+                                             location=None, tags=None):
     StorageAccountCreateParameters, AccountType = get_sdk(
+        cli_ctx,
         ResourceType.MGMT_STORAGE,
         'StorageAccountCreateParameters',
         'AccountType',
@@ -87,10 +91,11 @@ def create_storage_account_with_account_type(resource_group_name, account_name, 
     return scf.storage_accounts.create(resource_group_name, account_name, params)
 
 
-def update_storage_account(instance, sku=None, tags=None, custom_domain=None, use_subdomain=None,
-                           encryption_services=None, encryption_key_source=None, encryption_key_vault_properties=None,
+def update_storage_account(cli_ctx, instance, sku=None, tags=None, custom_domain=None, use_subdomain=None, encryption_services=None,
+                           encryption_key_source=None, encryption_key_vault_properties=None,
                            access_tier=None, https_only=None, assign_identity=False, bypass=None, default_action=None):
     StorageAccountUpdateParameters, Sku, CustomDomain, AccessTier, Identity, Encryption, NetworkRuleSet = get_sdk(
+        cli_ctx,
         ResourceType.MGMT_STORAGE,
         'StorageAccountUpdateParameters',
         'Sku',
@@ -148,7 +153,7 @@ def update_storage_account(instance, sku=None, tags=None, custom_domain=None, us
     return params
 
 
-@transfer_doc(FileService.list_directories_and_files)
+#@transfer_doc(FileService.list_directories_and_files)
 def list_share_files(client, share_name, directory_name=None, timeout=None,
                      exclude_dir=False):
     generator = client.list_directories_and_files(share_name, directory_name,
@@ -159,7 +164,7 @@ def list_share_files(client, share_name, directory_name=None, timeout=None,
     return generator
 
 
-@transfer_doc(FileService.list_directories_and_files)
+#@transfer_doc(FileService.list_directories_and_files)
 def list_share_directories(client, share_name, directory_name=None, timeout=None):
     generator = client.list_directories_and_files(share_name, directory_name,
                                                   timeout=timeout)
@@ -212,11 +217,13 @@ def show_storage_account_connection_string(
     return {'connectionString': connection_string}
 
 
-@transfer_doc(BlockBlobService.create_blob_from_path)
-def upload_blob(client, container_name, blob_name, file_path, blob_type=None, content_settings=None, metadata=None,
-                validate_content=False, maxsize_condition=None, max_connections=2, lease_id=None, tier=None,
-                if_modified_since=None, if_unmodified_since=None, if_match=None, if_none_match=None, timeout=None):
-    """Upload a blob to a container."""
+#@transfer_doc(BlockBlobService.create_blob_from_path)
+def upload_blob(  # pylint: disable=too-many-locals
+        client, cli_ctx, container_name, blob_name, file_path, blob_type=None,
+        content_settings=None, metadata=None, validate_content=False, maxsize_condition=None,
+        max_connections=2, lease_id=None, if_modified_since=None, tier=None,
+        if_unmodified_since=None, if_match=None, if_none_match=None, timeout=None):
+    '''Upload a blob to a container.'''
 
     settings_class = get_sdk(ResourceType.DATA_STORAGE, 'blob.models#ContentSettings')
     content_settings = guess_content_type(file_path, content_settings, settings_class)
@@ -244,7 +251,7 @@ def upload_blob(client, container_name, blob_name, file_path, blob_type=None, co
             'timeout': timeout
         }
 
-        if supported_api_version(ResourceType.DATA_STORAGE, min_api='2016-05-31'):
+        if cli_ctx.cloud.supported_api_version(ResourceType.DATA_STORAGE, min_api='2016-05-31'):
             append_blob_args['validate_content'] = validate_content
 
         return client.append_blob_from_path(**append_blob_args)
@@ -273,10 +280,10 @@ def upload_blob(client, container_name, blob_name, file_path, blob_type=None, co
             'timeout': timeout
         }
 
-        if supported_api_version(ResourceType.DATA_STORAGE, min_api='2017-04-17') and tier:
+        if cli_ctx.cloud.supported_api_version(ResourceType.DATA_STORAGE, min_api='2017-04-31') and tier:
             create_blob_args['premium_page_blob_tier'] = tier
 
-        if supported_api_version(ResourceType.DATA_STORAGE, min_api='2016-05-31'):
+        if cli_ctx.cloud.supported_api_version(ResourceType.DATA_STORAGE, min_api='2016-05-31'):
             create_blob_args['validate_content'] = validate_content
 
         return client.create_blob_from_path(**create_blob_args)

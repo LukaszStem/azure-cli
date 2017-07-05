@@ -5,17 +5,15 @@
 
 import unittest
 
-from azure.cli.core.application import APPLICATION, Configuration
+from azure.cli.testsdk import TestCli
 
-
-def mock_echo_args(command_name, parameters):
+def mock_echo_args(cli, command_name, parameters):
     try:
         argv = ' '.join((command_name, parameters)).split()
-        APPLICATION.initialize(Configuration())
-        command_table = APPLICATION.configuration.get_command_table(argv)
+        
         prefunc = command_table[command_name].handler
         command_table[command_name].handler = lambda args: args
-        parsed_namespace = APPLICATION.execute(argv)
+        parsed_namespace = cli.invoke(argv)
         return parsed_namespace
     finally:
         command_table[command_name].handler = prefunc
@@ -27,7 +25,8 @@ class Test_RedisCache(unittest.TestCase):
         pass
 
     def test_parse_redis_create(self):
-        args = mock_echo_args('redis create',
+        cli = TestCli()
+        args = mock_echo_args(cli, 'redis create',
                               '--tenant-settings {\"hello\":1} -g wombat -n asldkj -l westus '
                               '--sku basic --vm-size C1 ')
         subset = set(dict(vm_size='C1', sku='Basic', name='asldkj').items())

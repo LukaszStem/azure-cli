@@ -4,11 +4,8 @@
 # --------------------------------------------------------------------------------------------
 import uuid
 from azure.cli.core.commands.arm import parse_resource_id
-from azure.cli.core.commands import LongRunningOperation
-import azure.cli.core.azlogging as azlogging
-from azure.cli.core.util import CLIError
-from .custom import set_vm, _compute_client_factory, get_vmss_instance_view
-logger = azlogging.get_az_logger(__name__)
+from knack.util import CLIError
+from .custom import set_vm, _compute_client_factory
 
 _DATA_VOLUME_TYPE = 'DATA'
 _STATUS_ENCRYPTED = 'Encrypted'

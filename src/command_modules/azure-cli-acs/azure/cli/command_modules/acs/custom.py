@@ -30,12 +30,9 @@ from six.moves.urllib.error import URLError  # pylint: disable=import-error
 
 from msrestazure.azure_exceptions import CloudError
 
-import azure.cli.core.azlogging as azlogging
-from azure.cli.core.application import APPLICATION
 from azure.cli.command_modules.acs import acs_client, proxy
 from azure.cli.command_modules.acs._actions import _is_valid_ssh_rsa_public_key
-from azure.cli.command_modules.acs._params import regionsInPreview, regionsInProd
-from azure.cli.core.util import CLIError, shell_safe_json_parse
+from azure.cli.core.util import shell_safe_json_parse
 from azure.cli.core._profile import Profile
 from azure.cli.core.commands.client_factory import get_mgmt_service_client
 from azure.cli.core._environment import get_config_dir
@@ -48,9 +45,11 @@ from azure.graphrbac.models import (ApplicationCreateParameters,
                                     ServicePrincipalCreateParameters,
                                     GetObjectsParameters)
 from azure.mgmt.authorization.models import RoleAssignmentProperties
+
+from knack.util import CLIError
+
 from ._client_factory import (_auth_client_factory, _graph_client_factory)
 
-logger = azlogging.get_az_logger(__name__)
 
 # pylint:disable=too-many-lines
 
@@ -374,8 +373,8 @@ def _add_role_assignment(role, service_principal, delay=2):
     return True
 
 
-def _get_subscription_id():
-    _, sub_id, _ = Profile().get_login_credentials(subscription_id=None)
+def _get_subscription_id(cli_ctx):
+    _, sub_id, _ = Profile(cli_ctx).get_login_credentials(subscription_id=None)
     return sub_id
 
 

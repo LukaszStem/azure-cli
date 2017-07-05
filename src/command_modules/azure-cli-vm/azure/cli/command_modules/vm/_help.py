@@ -5,7 +5,7 @@
 
 # pylint: disable=line-too-long, too-many-lines
 
-from azure.cli.core.help_files import helps
+from knack.help_files import helps
 
 vm_ids_example = """        - name: {0}
           text: >
