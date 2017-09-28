@@ -88,10 +88,7 @@ def load_command_table(self, args):
         g.command('list', 'list_resource_groups', resource_custom, table_transformer=transform_resource_group_list)
         g.command('create', 'create_resource_group', resource_custom)
         g.command('export', 'export_group_as_template', resource_custom)
-        #self.cli_generic_update_command(__name__, 'group update',
-        #                                'azure.mgmt.resource.resources.operations.resource_groups_operations#ResourceGroupsOperations.get',
-        #                                'azure.mgmt.resource.resources.operations.resource_groups_operations#ResourceGroupsOperations.create_or_update',
-        #                                lambda: _resource_client_factory().resource_groups)
+        g.generic_update_command('update')
 
     # Resource commands
 

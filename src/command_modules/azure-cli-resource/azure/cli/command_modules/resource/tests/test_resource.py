@@ -111,7 +111,7 @@ class ResourceIDScenarioTest(ScenarioTest):
 
         if self.in_recording:
             from azure.cli.core.commands.client_factory import get_subscription_id
-            subscription_id = get_subscription_id(self.ctx)
+            subscription_id = get_subscription_id(self.cli_ctx)
         else:
             subscription_id = MOCKED_SUBSCRIPTION_ID
 

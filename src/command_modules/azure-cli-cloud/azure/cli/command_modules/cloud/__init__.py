@@ -15,8 +15,8 @@ import azure.cli.command_modules.cloud._help  # pylint: disable=unused-import
 
 class CloudCommandsLoader(AzCommandsLoader):
 
-    def __init__(self, ctx=None):
-        super(CloudCommandsLoader, self).__init__(ctx=ctx)
+    def __init__(self, cli_ctx=None):
+        super(CloudCommandsLoader, self).__init__(cli_ctx=cli_ctx)
         self.module_name = __name__
 
     def load_command_table(self, args):
@@ -36,7 +36,7 @@ class CloudCommandsLoader(AzCommandsLoader):
         return self.command_table
 
     def load_arguments(self, command):
-        active_cloud_name = self.ctx.cloud.name
+        active_cloud_name = self.cli_ctx.cloud.name
 
         with self.argument_context('cloud') as c:
             c.argument('cloud_name', options_list=('--name', '-n'), help='Name of a registered cloud', completer=get_cloud_name_completion_list)

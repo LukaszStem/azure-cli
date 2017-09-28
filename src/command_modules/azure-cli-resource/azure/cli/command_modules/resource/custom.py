@@ -76,6 +76,440 @@ def get_resource_types_completion_list(cli_ctx, prefix, **kwargs):  # pylint: di
     return types
 
 
+def _process_parameters(template_param_defs, parameter_lists):
+
+    def _try_parse_json_object(value):
+        try:
+            parsed = shell_safe_json_parse(value)
+            return parsed.get('parameters', parsed)
+        except CLIError:
+            return None
+
+    def _try_load_file_object(value):
+        if os.path.isfile(value):
+            parsed = get_file_json(value, throw_on_empty=False)
+            return parsed.get('parameters', parsed)
+        return None
+
+    def _try_parse_key_value_object(template_param_defs, parameters, value):
+        try:
+            key, value = value.split('=', 1)
+        except ValueError:
+            return False
+
+        param = template_param_defs.get(key, None)
+        if param is None:
+            raise CLIError("unrecognized template parameter '{}'. Allowed parameters: {}"
+                            .format(key, ', '.join(sorted(template_param_defs.keys()))))
+
+        param_type = param.get('type', None)
+        if param_type in ['object', 'array']:
+            parameters[key] = {'value': shell_safe_json_parse(value)}
+        elif param_type in ['string', 'securestring']:
+            parameters[key] = {'value': value}
+        elif param_type == 'bool':
+            parameters[key] = {'value': value.lower() == 'true'}
+        elif param_type == 'int':
+            parameters[key] = {'value': int(value)}
+        else:
+            logger.warning("Unrecognized type '%s' for parameter '%s'. Interpretting as string.", param_type, key)
+            parameters[key] = {'value': value}
+
+        return True
+
+    parameters = {}
+    for params in parameter_lists or []:
+        for item in params:
+            param_obj = _try_load_file_object(item) or _try_parse_json_object(item)
+            if param_obj:
+                parameters.update(param_obj)
+            elif not _try_parse_key_value_object(template_param_defs, parameters, item):
+                raise CLIError('Unable to parse parameter: {}'.format(item))
+
+    return parameters
+
+
+def _find_missing_parameters(parameters, template):
+    if template is None:
+        return {}
+    template_parameters = template.get('parameters', None)
+    if template_parameters is None:
+        return {}
+
+    missing = OrderedDict()
+    for parameter_name in template_parameters:
+        parameter = template_parameters[parameter_name]
+        if 'defaultValue' in parameter:
+            continue
+        if parameters is not None and parameters.get(parameter_name, None) is not None:
+            continue
+        missing[parameter_name] = parameter
+    return missing
+
+
+def _prompt_for_parameters(missing_parameters, fail_on_no_tty=True):  # pylint: disable=too-many-statements
+
+    prompt_list = missing_parameters.keys() if isinstance(missing_parameters, OrderedDict) \
+        else sorted(missing_parameters)
+    result = OrderedDict()
+    no_tty = False
+    for param_name in prompt_list:
+        param = missing_parameters[param_name]
+        param_type = param.get('type', 'string')
+        description = 'Missing description'
+        metadata = param.get('metadata', None)
+        if metadata is not None:
+            description = metadata.get('description', description)
+        allowed_values = param.get('allowedValues', None)
+
+        prompt_str = "Please provide {} value for '{}' (? for help): ".format(param_type, param_name)
+        while True:
+            if allowed_values is not None:
+                try:
+                    ix = prompt_choice_list(prompt_str, allowed_values, help_string=description)
+                    result[param_name] = allowed_values[ix]
+                except NoTTYException:
+                    result[param_name] = None
+                    no_tty = True
+                break
+            elif param_type == 'securestring':
+                try:
+                    value = prompt_pass(prompt_str, help_string=description)
+                except NoTTYException:
+                    value = None
+                    no_tty = True
+                result[param_name] = value
+                break
+            elif param_type == 'int':
+                try:
+                    int_value = prompt_int(prompt_str, help_string=description)
+                    result[param_name] = int_value
+                except NoTTYException:
+                    result[param_name] = 0
+                    no_tty = True
+                break
+            elif param_type == 'bool':
+                try:
+                    value = prompt_t_f(prompt_str, help_string=description)
+                    result[param_name] = value
+                except NoTTYException:
+                    result[param_name] = False
+                    no_tty = True
+                break
+            elif param_type in ['object', 'array']:
+                try:
+                    value = prompt(prompt_str, help_string=description)
+                except NoTTYException:
+                    value = ''
+                    no_tty = True
+
+                if value == '':
+                    value = {} if param_type == 'object' else []
+                else:
+                    try:
+                        value = shell_safe_json_parse(value)
+                    except Exception as ex:  # pylint: disable=broad-except
+                        logger.error(ex)
+                        continue
+                result[param_name] = value
+                break
+            else:
+                try:
+                    result[param_name] = prompt(prompt_str, help_string=description)
+                except NoTTYException:
+                    result[param_name] = None
+                    no_tty = True
+                break
+    if no_tty and fail_on_no_tty:
+        raise NoTTYException
+    return result
+
+
+def _get_missing_parameters(parameters, template, prompt_fn):
+    missing = _find_missing_parameters(parameters, template)
+    if missing:
+        prompt_parameters = prompt_fn(missing)
+        for param_name in prompt_parameters:
+            parameters[param_name] = {
+                "value": prompt_parameters[param_name]
+            }
+    return parameters
+
+
+def _ssl_context():
+    if sys.version_info < (3, 4):
+        return ssl.SSLContext(ssl.PROTOCOL_TLSv1)
+
+    return ssl.create_default_context()
+
+
+def _urlretrieve(url):
+    req = urlopen(url, context=_ssl_context())
+    return req.read()
+
+
+def _deploy_arm_template_core(cli_ctx, resource_group_name,  # pylint: disable=too-many-arguments
+                                template_file=None, template_uri=None, deployment_name=None,
+                                parameters=None, mode='incremental', validate_only=False,
+                                no_wait=False):
+    DeploymentProperties, TemplateLink = get_sdk(cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES,
+                                                    'DeploymentProperties',
+                                                    'TemplateLink',
+                                                    mod='models')
+    template = None
+    template_link = None
+    template_obj = None
+    if template_uri:
+        template_link = TemplateLink(uri=template_uri)
+        template_obj = shell_safe_json_parse(_urlretrieve(template_uri).decode('utf-8'), preserve_order=True)
+    else:
+        template = get_file_json(template_file, preserve_order=True)
+        template_obj = template
+
+    template_param_defs = template_obj.get('parameters', {})
+    template_obj['resources'] = template_obj.get('resources', [])
+    parameters = _process_parameters(template_param_defs, parameters) or {}
+    parameters = _get_missing_parameters(parameters, template_obj, _prompt_for_parameters)
+
+    template = json.loads(json.dumps(template))
+    parameters = json.loads(json.dumps(parameters))
+
+    properties = DeploymentProperties(template=template, template_link=template_link,
+                                        parameters=parameters, mode=mode)
+
+    smc = get_mgmt_service_client(cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
+    if validate_only:
+        return smc.deployments.validate(resource_group_name, deployment_name, properties, raw=no_wait)
+    return smc.deployments.create_or_update(resource_group_name, deployment_name, properties, raw=no_wait)
+
+
+def _list_resources_odata_filter_builder(resource_group_name=None, resource_provider_namespace=None,
+                                            resource_type=None, name=None, tag=None, location=None):
+    """Build up OData filter string from parameters
+    """
+    filters = []
+
+    if resource_group_name:
+        filters.append("resourceGroup eq '{}'".format(resource_group_name))
+
+    if name:
+        filters.append("name eq '{}'".format(name))
+
+    if location:
+        filters.append("location eq '{}'".format(location))
+
+    if resource_type:
+        if resource_provider_namespace:
+            f = "'{}/{}'".format(resource_provider_namespace, resource_type)
+        else:
+            if not re.match('[^/]+/[^/]+', resource_type):
+                raise CLIError(
+                    'Malformed resource-type: '
+                    '--resource-type=<namespace>/<resource-type> expected.')
+            # assume resource_type is <namespace>/<type>. The worst is to get a server error
+            f = "'{}'".format(resource_type)
+        filters.append("resourceType eq " + f)
+    else:
+        if resource_provider_namespace:
+            raise CLIError('--namespace also requires --resource-type')
+
+    if tag:
+        if name or location:
+            raise IncorrectUsageError('you cannot use the tag filter with other filters')
+
+        tag_name = list(tag.keys())[0] if isinstance(tag, dict) else tag
+        tag_value = tag[tag_name] if isinstance(tag, dict) else ''
+        if tag_name:
+            if tag_name[-1] == '*':
+                filters.append("startswith(tagname, '%s')" % tag_name[0:-1])
+            else:
+                filters.append("tagname eq '%s'" % tag_name)
+                if tag_value != '':
+                    filters.append("tagvalue eq '%s'" % tag_value)
+    return ' and '.join(filters)
+
+
+def _get_auth_provider_latest_api_version(cli_ctx):
+    rcf = _resource_client_factory(cli_ctx)
+    api_version = _ResourceUtils.resolve_api_version(rcf, 'Microsoft.Authorization', None, 'providerOperations')
+    return api_version
+
+
+def _update_provider(cli_ctx, namespace, registering, wait):
+    import time
+    rcf = _resource_client_factory(cli_ctx)
+    if registering:
+        rcf.providers.register(namespace)
+    else:
+        rcf.providers.unregister(namespace)
+
+    if wait:
+        while True:
+            time.sleep(10)
+            rp_info = rcf.providers.get(namespace)
+            if rp_info.registration_state == ('Registered' if registering else 'Unregistered'):
+                break
+    else:
+        action = 'Registering' if registering else 'Unregistering'
+        msg_template = '%s is still on-going. You can monitor using \'az provider show -n %s\''
+        logger.warning(msg_template, action, namespace)
+
+
+def _build_policy_scope(subscription_id, resource_group_name, scope):
+    subscription_scope = '/subscriptions/' + subscription_id
+    if scope:
+        if resource_group_name:
+            err = "Resource group '{}' is redundant because 'scope' is supplied"
+            raise CLIError(err.format(resource_group_name))
+    elif resource_group_name:
+        scope = subscription_scope + '/resourceGroups/' + resource_group_name
+    else:
+        scope = subscription_scope
+    return scope
+
+
+def _resolve_policy_id(policy, client):
+    policy_id = policy
+    if not is_valid_resource_id(policy):
+        policy_def = client.policy_definitions.get(policy)
+        policy_id = policy_def.id
+    return policy_id
+
+
+def _load_file_string_or_uri(file_or_string_or_uri, name, required=True):
+    if file_or_string_or_uri is None:
+        if required:
+            raise CLIError('One of --{} or --{}-uri is required'.format(name, name))
+        return None
+    url = urlparse(file_or_string_or_uri)
+    if url.scheme == 'http' or url.scheme == 'https' or url.scheme == 'file':
+        response = urlopen(file_or_string_or_uri)
+        reader = codecs.getreader('utf-8')
+        result = json.load(reader(response))
+        response.close()
+        return result
+    if os.path.exists(file_or_string_or_uri):
+        return get_file_json(file_or_string_or_uri)
+    return shell_safe_json_parse(file_or_string_or_uri)
+
+
+def _validate_lock_params_match_lock(
+        lock_client, name, resource_group_name, resource_provider_namespace, parent_resource_path,
+        resource_type, resource_name):
+    """
+    Locks are scoped to subscription, resource group or resource.
+    However, the az list command returns all locks for the current scopes
+    and all lower scopes (e.g. resource group level also includes resource locks).
+    This can lead to a confusing user experience where the user specifies a lock
+    name and assumes that it will work, even if they haven't given the right
+    scope. This function attempts to validate the parameters and help the
+    user find the right scope, by first finding the lock, and then infering
+    what it's parameters should be.
+    """
+    locks = lock_client.management_locks.list_at_subscription_level()
+    found_count = 0  # locks at different levels can have the same name
+    lock_resource_id = None
+    for lock in locks:
+        if lock.name == name:
+            found_count = found_count + 1
+            lock_resource_id = lock.id
+    if found_count == 1:
+        # If we only found one lock, let's validate that the parameters are correct,
+        # if we found more than one, we'll assume the user knows what they're doing
+        # TODO: Add validation for that case too?
+        resource = parse_resource_id(lock_resource_id)
+        _resource_group = resource.get('resource_group', None)
+        _resource_namespace = resource.get('namespace', None)
+        if _resource_group is None:
+            return
+        if resource_group_name != _resource_group:
+            raise CLIError(
+                'Unexpected --resource-group for lock {}, expected {}'.format(
+                    name, _resource_group))
+        if _resource_namespace is None or _resource_namespace == 'Microsoft.Authorization':
+            return
+        if resource_provider_namespace != _resource_namespace:
+            raise CLIError(
+                'Unexpected --namespace for lock {}, expected {}'.format(name, _resource_namespace))
+        if resource.get('grandchild_type', None) is None:
+            _resource_type = resource.get('type', None)
+            _resource_name = resource.get('name', None)
+        else:
+            _resource_type = resource.get('child_type', None)
+            _resource_name = resource.get('child_name', None)
+            parent = (resource['type'] + '/' + resource['name'])
+            if parent != parent_resource_path:
+                raise CLIError(
+                    'Unexpected --parent for lock {}, expected {}'.format(
+                        name, parent))
+        if resource_type != _resource_type:
+            raise CLIError('Unexpected --resource-type for lock {}, expected {}'.format(
+                name, _resource_type))
+        if resource_name != _resource_name:
+            raise CLIError('Unexpected --resource-name for lock {}, expected {}'.format(
+                name, _resource_name))
+
+
+def _parse_lock_id(id_arg):
+    """
+    Lock ids look very different from regular resource ids, this function uses a regular expression
+    that parses a lock's id and extracts the following parameters if available:
+    -lock_name: the lock's name; always present in a lock id
+    -resource_group_name: the name of the resource group; present in group/resource level locks
+    -resource_provider_namespace: the resource provider; present in resource level locks
+    -resource_type: the resource type; present in resource level locks
+    -resource_name: the resource name; present in resource level locks
+    -parent_resource_path: the resource's parent path; present in child resources such as subnets
+    """
+    regex = re.compile(
+        '/subscriptions/[^/]*(/resource[gG]roups/(?P<resource_group_name>[^/]*)'
+        '(/providers/(?P<resource_provider_namespace>[^/]*)'
+        '(/(?P<parent_resource_path>.*))?/(?P<resource_type>[^/]*)/(?P<resource_name>[^/]*))?)?'
+        '/providers/Microsoft.Authorization/locks/(?P<lock_name>[^/]*)')
+
+    return regex.match(id_arg).groupdict()
+
+
+def _call_subscription_get(lock_client, *args):
+    if supported_api_version(ResourceType.MGMT_RESOURCE_LOCKS, max_api='2015-01-01'):
+        return lock_client.management_locks.get(*args)
+    return lock_client.management_locks.get_at_subscription_level(*args)
+
+
+def _extract_lock_params(resource_group_name, resource_provider_namespace,
+                            resource_type, resource_name):
+    if resource_group_name is None:
+        return (None, None, None, None)
+
+    if resource_name is None:
+        return (resource_group_name, None, None, None)
+
+    parts = resource_type.split('/', 2)
+    if resource_provider_namespace is None and len(parts) == 2:
+        resource_provider_namespace = parts[0]
+        resource_type = parts[1]
+    return (resource_group_name, resource_name, resource_provider_namespace, resource_type)
+
+
+def _update_lock_parameters(parameters, level, notes):
+    if level is not None:
+        parameters.level = level
+    if notes is not None:
+        parameters.notes = notes
+
+
+def _validate_resource_inputs(resource_group_name, resource_provider_namespace,
+                                resource_type, resource_name):
+    if resource_group_name is None:
+        raise CLIError('--resource-group/-g is required.')
+    if resource_type is None:
+        raise CLIError('--resource-type is required')
+    if resource_name is None:
+        raise CLIError('--name/-n is required')
+    if resource_provider_namespace is None:
+        raise CLIError('--namespace is required')
+
+
 class CustomResourceOperations(object):
 
     def list_resource_groups(cli_ctx, tag=None):  # pylint: disable=no-self-use
@@ -289,213 +723,6 @@ class CustomResourceOperations(object):
                                             'deployment_dry_run', parameters, mode, validate_only=True)
 
 
-    def _process_parameters(template_param_defs, parameter_lists):
-
-        def _try_parse_json_object(value):
-            try:
-                parsed = shell_safe_json_parse(value)
-                return parsed.get('parameters', parsed)
-            except CLIError:
-                return None
-
-        def _try_load_file_object(value):
-            if os.path.isfile(value):
-                parsed = get_file_json(value, throw_on_empty=False)
-                return parsed.get('parameters', parsed)
-            return None
-
-        def _try_parse_key_value_object(template_param_defs, parameters, value):
-            try:
-                key, value = value.split('=', 1)
-            except ValueError:
-                return False
-
-            param = template_param_defs.get(key, None)
-            if param is None:
-                raise CLIError("unrecognized template parameter '{}'. Allowed parameters: {}"
-                                .format(key, ', '.join(sorted(template_param_defs.keys()))))
-
-            param_type = param.get('type', None)
-            if param_type in ['object', 'array']:
-                parameters[key] = {'value': shell_safe_json_parse(value)}
-            elif param_type in ['string', 'securestring']:
-                parameters[key] = {'value': value}
-            elif param_type == 'bool':
-                parameters[key] = {'value': value.lower() == 'true'}
-            elif param_type == 'int':
-                parameters[key] = {'value': int(value)}
-            else:
-                logger.warning("Unrecognized type '%s' for parameter '%s'. Interpretting as string.", param_type, key)
-                parameters[key] = {'value': value}
-
-            return True
-
-        parameters = {}
-        for params in parameter_lists or []:
-            for item in params:
-                param_obj = _try_load_file_object(item) or _try_parse_json_object(item)
-                if param_obj:
-                    parameters.update(param_obj)
-                elif not _try_parse_key_value_object(template_param_defs, parameters, item):
-                    raise CLIError('Unable to parse parameter: {}'.format(item))
-
-        return parameters
-
-
-    def _find_missing_parameters(parameters, template):
-        if template is None:
-            return {}
-        template_parameters = template.get('parameters', None)
-        if template_parameters is None:
-            return {}
-
-        missing = OrderedDict()
-        for parameter_name in template_parameters:
-            parameter = template_parameters[parameter_name]
-            if 'defaultValue' in parameter:
-                continue
-            if parameters is not None and parameters.get(parameter_name, None) is not None:
-                continue
-            missing[parameter_name] = parameter
-        return missing
-
-
-    def _prompt_for_parameters(missing_parameters, fail_on_no_tty=True):  # pylint: disable=too-many-statements
-
-        prompt_list = missing_parameters.keys() if isinstance(missing_parameters, OrderedDict) \
-            else sorted(missing_parameters)
-        result = OrderedDict()
-        no_tty = False
-        for param_name in prompt_list:
-            param = missing_parameters[param_name]
-            param_type = param.get('type', 'string')
-            description = 'Missing description'
-            metadata = param.get('metadata', None)
-            if metadata is not None:
-                description = metadata.get('description', description)
-            allowed_values = param.get('allowedValues', None)
-
-            prompt_str = "Please provide {} value for '{}' (? for help): ".format(param_type, param_name)
-            while True:
-                if allowed_values is not None:
-                    try:
-                        ix = prompt_choice_list(prompt_str, allowed_values, help_string=description)
-                        result[param_name] = allowed_values[ix]
-                    except NoTTYException:
-                        result[param_name] = None
-                        no_tty = True
-                    break
-                elif param_type == 'securestring':
-                    try:
-                        value = prompt_pass(prompt_str, help_string=description)
-                    except NoTTYException:
-                        value = None
-                        no_tty = True
-                    result[param_name] = value
-                    break
-                elif param_type == 'int':
-                    try:
-                        int_value = prompt_int(prompt_str, help_string=description)
-                        result[param_name] = int_value
-                    except NoTTYException:
-                        result[param_name] = 0
-                        no_tty = True
-                    break
-                elif param_type == 'bool':
-                    try:
-                        value = prompt_t_f(prompt_str, help_string=description)
-                        result[param_name] = value
-                    except NoTTYException:
-                        result[param_name] = False
-                        no_tty = True
-                    break
-                elif param_type in ['object', 'array']:
-                    try:
-                        value = prompt(prompt_str, help_string=description)
-                    except NoTTYException:
-                        value = ''
-                        no_tty = True
-
-                    if value == '':
-                        value = {} if param_type == 'object' else []
-                    else:
-                        try:
-                            value = shell_safe_json_parse(value)
-                        except Exception as ex:  # pylint: disable=broad-except
-                            logger.error(ex)
-                            continue
-                    result[param_name] = value
-                    break
-                else:
-                    try:
-                        result[param_name] = prompt(prompt_str, help_string=description)
-                    except NoTTYException:
-                        result[param_name] = None
-                        no_tty = True
-                    break
-        if no_tty and fail_on_no_tty:
-            raise NoTTYException
-        return result
-
-
-    def _get_missing_parameters(parameters, template, prompt_fn):
-        missing = _find_missing_parameters(parameters, template)
-        if missing:
-            prompt_parameters = prompt_fn(missing)
-            for param_name in prompt_parameters:
-                parameters[param_name] = {
-                    "value": prompt_parameters[param_name]
-                }
-        return parameters
-
-
-    def _ssl_context():
-        if sys.version_info < (3, 4):
-            return ssl.SSLContext(ssl.PROTOCOL_TLSv1)
-
-        return ssl.create_default_context()
-
-
-    def _urlretrieve(url):
-        req = urlopen(url, context=_ssl_context())
-        return req.read()
-
-
-    def _deploy_arm_template_core(cli_ctx, resource_group_name,  # pylint: disable=too-many-arguments
-                                    template_file=None, template_uri=None, deployment_name=None,
-                                    parameters=None, mode='incremental', validate_only=False,
-                                    no_wait=False):
-        DeploymentProperties, TemplateLink = get_sdk(cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES,
-                                                     'DeploymentProperties',
-                                                     'TemplateLink',
-                                                     mod='models')
-        template = None
-        template_link = None
-        template_obj = None
-        if template_uri:
-            template_link = TemplateLink(uri=template_uri)
-            template_obj = shell_safe_json_parse(_urlretrieve(template_uri).decode('utf-8'), preserve_order=True)
-        else:
-            template = get_file_json(template_file, preserve_order=True)
-            template_obj = template
-
-        template_param_defs = template_obj.get('parameters', {})
-        template_obj['resources'] = template_obj.get('resources', [])
-        parameters = _process_parameters(template_param_defs, parameters) or {}
-        parameters = _get_missing_parameters(parameters, template_obj, _prompt_for_parameters)
-
-        template = json.loads(json.dumps(template))
-        parameters = json.loads(json.dumps(parameters))
-
-        properties = DeploymentProperties(template=template, template_link=template_link,
-                                            parameters=parameters, mode=mode)
-
-        smc = get_mgmt_service_client(cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
-        if validate_only:
-            return smc.deployments.validate(resource_group_name, deployment_name, properties, raw=no_wait)
-        return smc.deployments.create_or_update(resource_group_name, deployment_name, properties, raw=no_wait)
-
-
     def export_deployment_as_template(cli_ctx, resource_group_name, deployment_name):
         smc = get_mgmt_service_client(cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
         result = smc.deployments.export_template(resource_group_name, deployment_name)
@@ -586,78 +813,12 @@ class CustomResourceOperations(object):
         return list(resources)
 
 
-    def _list_resources_odata_filter_builder(resource_group_name=None, resource_provider_namespace=None,
-                                             resource_type=None, name=None, tag=None, location=None):
-        """Build up OData filter string from parameters
-        """
-        filters = []
-
-        if resource_group_name:
-            filters.append("resourceGroup eq '{}'".format(resource_group_name))
-
-        if name:
-            filters.append("name eq '{}'".format(name))
-
-        if location:
-            filters.append("location eq '{}'".format(location))
-
-        if resource_type:
-            if resource_provider_namespace:
-                f = "'{}/{}'".format(resource_provider_namespace, resource_type)
-            else:
-                if not re.match('[^/]+/[^/]+', resource_type):
-                    raise CLIError(
-                        'Malformed resource-type: '
-                        '--resource-type=<namespace>/<resource-type> expected.')
-                # assume resource_type is <namespace>/<type>. The worst is to get a server error
-                f = "'{}'".format(resource_type)
-            filters.append("resourceType eq " + f)
-        else:
-            if resource_provider_namespace:
-                raise CLIError('--namespace also requires --resource-type')
-
-        if tag:
-            if name or location:
-                raise IncorrectUsageError('you cannot use the tag filter with other filters')
-
-            tag_name = list(tag.keys())[0] if isinstance(tag, dict) else tag
-            tag_value = tag[tag_name] if isinstance(tag, dict) else ''
-            if tag_name:
-                if tag_name[-1] == '*':
-                    filters.append("startswith(tagname, '%s')" % tag_name[0:-1])
-                else:
-                    filters.append("tagname eq '%s'" % tag_name)
-                    if tag_value != '':
-                        filters.append("tagvalue eq '%s'" % tag_value)
-        return ' and '.join(filters)
-
-
     def register_provider(cli_ctx, resource_provider_namespace, wait=False):
         _update_provider(cli_ctx, resource_provider_namespace, registering=True, wait=wait)
 
 
     def unregister_provider(cli_ctx, resource_provider_namespace, wait=False):
         _update_provider(cli_ctx, resource_provider_namespace, registering=False, wait=wait)
-
-
-    def _update_provider(cli_ctx, namespace, registering, wait):
-        import time
-        rcf = _resource_client_factory(cli_ctx)
-        if registering:
-            rcf.providers.register(namespace)
-        else:
-            rcf.providers.unregister(namespace)
-
-        if wait:
-            while True:
-                time.sleep(10)
-                rp_info = rcf.providers.get(namespace)
-                if rp_info.registration_state == ('Registered' if registering else 'Unregistered'):
-                    break
-        else:
-            action = 'Registering' if registering else 'Unregistering'
-            msg_template = '%s is still on-going. You can monitor using \'az provider show -n %s\''
-            logger.warning(msg_template, action, namespace)
 
 
     def list_provider_operations(cli_ctx, api_version=None):
@@ -671,12 +832,6 @@ class CustomResourceOperations(object):
 
         auth_client = _authorization_management_client(cli_ctx)
         return auth_client.provider_operations_metadata.get(resource_provider_namespace, api_version)
-
-
-    def _get_auth_provider_latest_api_version(cli_ctx):
-        rcf = _resource_client_factory(cli_ctx)
-        api_version = _ResourceUtils.resolve_api_version(rcf, 'Microsoft.Authorization', None, 'providerOperations')
-        return api_version
 
 
     def move_resource(cli_ctx, ids, destination_group, destination_subscription_id=None):
@@ -785,44 +940,6 @@ class CustomResourceOperations(object):
         return result
 
 
-    def _build_policy_scope(subscription_id, resource_group_name, scope):
-        subscription_scope = '/subscriptions/' + subscription_id
-        if scope:
-            if resource_group_name:
-                err = "Resource group '{}' is redundant because 'scope' is supplied"
-                raise CLIError(err.format(resource_group_name))
-        elif resource_group_name:
-            scope = subscription_scope + '/resourceGroups/' + resource_group_name
-        else:
-            scope = subscription_scope
-        return scope
-
-
-    def _resolve_policy_id(policy, client):
-        policy_id = policy
-        if not is_valid_resource_id(policy):
-            policy_def = client.policy_definitions.get(policy)
-            policy_id = policy_def.id
-        return policy_id
-
-
-    def _load_file_string_or_uri(file_or_string_or_uri, name, required=True):
-        if file_or_string_or_uri is None:
-            if required:
-                raise CLIError('One of --{} or --{}-uri is required'.format(name, name))
-            return None
-        url = urlparse(file_or_string_or_uri)
-        if url.scheme == 'http' or url.scheme == 'https' or url.scheme == 'file':
-            response = urlopen(file_or_string_or_uri)
-            reader = codecs.getreader('utf-8')
-            result = json.load(reader(response))
-            response.close()
-            return result
-        if os.path.exists(file_or_string_or_uri):
-            return get_file_json(file_or_string_or_uri)
-        return shell_safe_json_parse(file_or_string_or_uri)
-
-
     def create_policy_definition(name, rules=None, params=None, display_name=None, description=None, mode=None):
         rules = _load_file_string_or_uri(rules, 'rules')
         params = _load_file_string_or_uri(params, 'params', False)
@@ -907,89 +1024,6 @@ class CustomResourceOperations(object):
         return lock_client.management_locks.list_at_resource_level(
             resource_group_name, resource_provider_namespace, parent_resource_path or '', resource_type,
             resource_name, filter=filter_string)
-
-
-    def _validate_lock_params_match_lock(
-            lock_client, name, resource_group_name, resource_provider_namespace, parent_resource_path,
-            resource_type, resource_name):
-        """
-        Locks are scoped to subscription, resource group or resource.
-        However, the az list command returns all locks for the current scopes
-        and all lower scopes (e.g. resource group level also includes resource locks).
-        This can lead to a confusing user experience where the user specifies a lock
-        name and assumes that it will work, even if they haven't given the right
-        scope. This function attempts to validate the parameters and help the
-        user find the right scope, by first finding the lock, and then infering
-        what it's parameters should be.
-        """
-        locks = lock_client.management_locks.list_at_subscription_level()
-        found_count = 0  # locks at different levels can have the same name
-        lock_resource_id = None
-        for lock in locks:
-            if lock.name == name:
-                found_count = found_count + 1
-                lock_resource_id = lock.id
-        if found_count == 1:
-            # If we only found one lock, let's validate that the parameters are correct,
-            # if we found more than one, we'll assume the user knows what they're doing
-            # TODO: Add validation for that case too?
-            resource = parse_resource_id(lock_resource_id)
-            _resource_group = resource.get('resource_group', None)
-            _resource_namespace = resource.get('namespace', None)
-            if _resource_group is None:
-                return
-            if resource_group_name != _resource_group:
-                raise CLIError(
-                    'Unexpected --resource-group for lock {}, expected {}'.format(
-                        name, _resource_group))
-            if _resource_namespace is None or _resource_namespace == 'Microsoft.Authorization':
-                return
-            if resource_provider_namespace != _resource_namespace:
-                raise CLIError(
-                    'Unexpected --namespace for lock {}, expected {}'.format(name, _resource_namespace))
-            if resource.get('grandchild_type', None) is None:
-                _resource_type = resource.get('type', None)
-                _resource_name = resource.get('name', None)
-            else:
-                _resource_type = resource.get('child_type', None)
-                _resource_name = resource.get('child_name', None)
-                parent = (resource['type'] + '/' + resource['name'])
-                if parent != parent_resource_path:
-                    raise CLIError(
-                        'Unexpected --parent for lock {}, expected {}'.format(
-                            name, parent))
-            if resource_type != _resource_type:
-                raise CLIError('Unexpected --resource-type for lock {}, expected {}'.format(
-                    name, _resource_type))
-            if resource_name != _resource_name:
-                raise CLIError('Unexpected --resource-name for lock {}, expected {}'.format(
-                    name, _resource_name))
-
-
-    def _parse_lock_id(id_arg):
-        """
-        Lock ids look very different from regular resource ids, this function uses a regular expression
-        that parses a lock's id and extracts the following parameters if available:
-        -lock_name: the lock's name; always present in a lock id
-        -resource_group_name: the name of the resource group; present in group/resource level locks
-        -resource_provider_namespace: the resource provider; present in resource level locks
-        -resource_type: the resource type; present in resource level locks
-        -resource_name: the resource name; present in resource level locks
-        -parent_resource_path: the resource's parent path; present in child resources such as subnets
-        """
-        regex = re.compile(
-            '/subscriptions/[^/]*(/resource[gG]roups/(?P<resource_group_name>[^/]*)'
-            '(/providers/(?P<resource_provider_namespace>[^/]*)'
-            '(/(?P<parent_resource_path>.*))?/(?P<resource_type>[^/]*)/(?P<resource_name>[^/]*))?)?'
-            '/providers/Microsoft.Authorization/locks/(?P<lock_name>[^/]*)')
-
-        return regex.match(id_arg).groupdict()
-
-
-    def _call_subscription_get(lock_client, *args):
-        if supported_api_version(ResourceType.MGMT_RESOURCE_LOCKS, max_api='2015-01-01'):
-            return lock_client.management_locks.get(*args)
-        return lock_client.management_locks.get_at_subscription_level(*args)
 
 
     def get_lock(lock_name=None, resource_group_name=None, resource_provider_namespace=None,
@@ -1083,21 +1117,6 @@ class CustomResourceOperations(object):
             resource_name, lock_name)
 
 
-    def _extract_lock_params(resource_group_name, resource_provider_namespace,
-                                resource_type, resource_name):
-        if resource_group_name is None:
-            return (None, None, None, None)
-
-        if resource_name is None:
-            return (resource_group_name, None, None, None)
-
-        parts = resource_type.split('/', 2)
-        if resource_provider_namespace is None and len(parts) == 2:
-            resource_provider_namespace = parts[0]
-            resource_type = parts[1]
-        return (resource_group_name, resource_name, resource_provider_namespace, resource_type)
-
-
     def create_lock(lock_name,
                     resource_group_name=None, resource_provider_namespace=None, notes=None,
                     parent_resource_path=None, resource_type=None, resource_name=None, level=None):
@@ -1137,13 +1156,6 @@ class CustomResourceOperations(object):
         return lock_client.management_locks.create_or_update_at_resource_level(
             resource_group_name, resource_provider_namespace, parent_resource_path or '', resource_type,
             resource_name, lock_name, parameters)
-
-
-    def _update_lock_parameters(parameters, level, notes):
-        if level is not None:
-            parameters.level = level
-        if notes is not None:
-            parameters.notes = notes
 
 
     def update_lock(lock_name=None, resource_group_name=None, resource_provider_namespace=None, notes=None,
@@ -1237,18 +1249,6 @@ class CustomResourceOperations(object):
         if scope is not None:
             return links_client.list_at_source_scope(scope, filter=filter_string)
         return links_client.list_at_subscription(filter=filter_string)
-
-
-    def _validate_resource_inputs(resource_group_name, resource_provider_namespace,
-                                    resource_type, resource_name):
-        if resource_group_name is None:
-            raise CLIError('--resource-group/-g is required.')
-        if resource_type is None:
-            raise CLIError('--resource-type is required')
-        if resource_name is None:
-            raise CLIError('--name/-n is required')
-        if resource_provider_namespace is None:
-            raise CLIError('--namespace is required')
 
 
 class _ResourceUtils(object):  # pylint: disable=too-many-instance-attributes

@@ -9,7 +9,7 @@ import configparser
 import os
 import sys
 
-from knack.arguments import ignore_type, CLICommandArgument
+from knack.arguments import ignore_type, CLICommandArgument, ArgumentsContext
 from knack.cli import CLI
 from knack.commands import CLICommandsLoader, CLICommand, CommandGroup as KnackCommandGroup
 from knack.completion import ARGCOMPLETE_ENV_NAME
@@ -58,9 +58,9 @@ def _expand_file_prefixed_files(args):
     return list([_expand_file_prefix(arg) for arg in args])
 
 
-def _pre_command_table_create(ctx, args):
+def _pre_command_table_create(cli_ctx, args):
 
-    ctx.refresh_request_id()
+    cli_ctx.refresh_request_id()
     return _expand_file_prefixed_files(args)
 
 
@@ -87,16 +87,6 @@ def _explode_list_args(args):
             for key_index, key in enumerate(list_args.keys()):
                 setattr(new_ns, key, value[key_index])
             yield new_ns
-
-
-def _validate_arguments(args, **_):
-    for validator in getattr(args, '_validators', []):
-        validator(args)
-    try:
-        delattr(args, '_validators')
-    except AttributeError:
-        pass
-
 
 class AzCli(CLI):
 
@@ -152,12 +142,13 @@ class AzCli(CLI):
 
 class AzCliCommand(CLICommand):
 
-    def __init__(self, ctx, name, handler, description=None, table_transformer=None,
+    def __init__(self, cli_ctx, name, handler, description=None, table_transformer=None,
                  arguments_loader=None, description_loader=None,
-                 formatter_class=None, deprecate_info=None, **kwargs):
-        super(AzCliCommand, self).__init__(ctx, name, handler, description=description, table_transformer=table_transformer,
-                                           arguments_loader=arguments_loader, description_loader=description_loader,
-                                           formatter_class=formatter_class, deprecate_info=deprecate_info, **kwargs)
+                 formatter_class=None, deprecate_info=None, validator=None, **kwargs):
+        super(AzCliCommand, self).__init__(cli_ctx, name, handler, description=description,
+                                           table_transformer=table_transformer, arguments_loader=arguments_loader,
+                                           description_loader=description_loader, formatter_class=formatter_class,
+                                           deprecate_info=deprecate_info, validator=validator, **kwargs)
         self.command_source = None
         self.no_wait_param = kwargs.get('no_wait_param', None)
         self.exception_handler = kwargs.get('exception_handler', None)
@@ -175,7 +166,7 @@ class AzCliCommand(CLICommand):
             if (self.name.split()[-1] == 'create' and overrides.settings.get('metavar', None) == 'NAME'):
                 return
             setattr(arg.type, 'configured_default_applied', True)
-            config_value = self.ctx.config.get(DEFAULTS_SECTION, def_config, None)
+            config_value = self.cli_ctx.config.get(DEFAULTS_SECTION, def_config, None)
             if config_value:
                 logger.warning("Using default '%s' for arg %s", config_value, arg.name)
                 overrides.settings['default'] = config_value
@@ -202,9 +193,9 @@ class AzCliCommand(CLICommand):
 
 class MainCommandsLoader(CLICommandsLoader):
 
-    def __init__(self, ctx=None):
+    def __init__(self, cli_ctx=None):
         import knack.events as events
-        super(MainCommandsLoader, self).__init__(ctx)
+        super(MainCommandsLoader, self).__init__(cli_ctx)
         self.loaders = []
 
     def load_command_table(self, args):
@@ -252,19 +243,20 @@ class MainCommandsLoader(CLICommandsLoader):
             loader.load_arguments(command)
             self.argument_registry.arguments.update(loader.argument_registry.arguments)
 
-        self.register_cli_argument('', 'resource_group_name', resource_group_name_type)
-        self.register_cli_argument('', 'location', location_type)
-        self.register_cli_argument('', 'deployment_name', deployment_name_type)
-        self.register_cli_argument('', 'cli_ctx', ignore_type, default=self.ctx)
+        with ArgumentsContext(self, '') as c:
+            c.argument('resource_group_name', resource_group_name_type)
+            c.argument('location', location_type)
+            c.argument('deployment_name', deployment_name_type)
+            c.argument('cli_ctx', ignore_type, default=self.cli_ctx)
 
         super(MainCommandsLoader, self).load_arguments(command)
 
 
 class AzCommandsLoader(CLICommandsLoader):
 
-    def __init__(self, ctx=None, default_resource_type=None):
+    def __init__(self, cli_ctx=None, default_resource_type=None):
         from azure.cli.core.profiles import PROFILE_TYPE
-        super(AzCommandsLoader, self).__init__(ctx=ctx)
+        super(AzCommandsLoader, self).__init__(cli_ctx=cli_ctx, command_cls=AzCliCommand)
         self.module_name = __name__
         self.default_resource_type = default_resource_type or PROFILE_TYPE
         self.max_api = 'latest'
@@ -283,7 +275,7 @@ class AzCommandsLoader(CLICommandsLoader):
     def supported_api_version(self, resource_type=None, min_api=None, max_api=None):
         from azure.cli.core.profiles import supported_api_version
         return supported_api_version(
-            cli_ctx=self.ctx,
+            cli_ctx=self.cli_ctx,
             resource_type=resource_type or self.default_resource_type,
             min_api=min_api or self.min_api,
             max_api=max_api or self.max_api)
@@ -295,15 +287,6 @@ class AzCommandsLoader(CLICommandsLoader):
     def argument_context(self, scope, **kwargs):
         from azure.cli.core.sdk.util import _ParametersContext
         return _ParametersContext(self, scope, **kwargs)
-
-    def cli_command(self, name, operation, **kwargs):
-        raise TypeError('cli_command is not supported.')
-
-    def register_cli_argument(self, scope, dest, arg_type=None, **kwargs):
-        raise TypeError('register_cli_argument is not supported.')
-
-    def register_extra_cli_argument(self, command, dest, **kwargs):
-        raise TypeError('register_extra_cli_argument is not supported.')
 
     def _cli_command(self, name, operation, **kwargs):
         from azure.cli.core.extension import EXTENSIONS_MOD_PREFIX
@@ -321,13 +304,6 @@ class AzCommandsLoader(CLICommandsLoader):
         else:
             self.command_table[name].command_source = None
 
-
-    def _register_cli_argument(self, scope, dest, arg_type=None, **kwargs):
-        super(AzCommandsLoader, self).register_cli_argument(scope, dest, arg_type, **kwargs)
-
-    def _register_extra_cli_argument(self, command, dest, **kwargs):
-        super(AzCommandsLoader, self).register_extra_cli_argument(command, dest, **kwargs)
-
     def create_command(self, module_name, name, operation, **kwargs):  # pylint: disable=unused-argument
 
         if not isinstance(operation, six.string_types):
@@ -342,15 +318,15 @@ class AzCommandsLoader(CLICommandsLoader):
         def _command_handler(command_args):
             if confirmation \
                 and not command_args.get(CONFIRM_PARAM_NAME) \
-                and not self.ctx.config.getboolean('core', 'disable_confirm_prompt', fallback=False) \
+                and not self.cli_ctx.config.getboolean('core', 'disable_confirm_prompt', fallback=False) \
                     and not AzCommandsLoader.user_confirmed(confirmation, command_args):
                 from knack.events import EVENT_COMMAND_CANCELLED
                 from knack.util import CLIError
 
-                self.ctx.raise_event(EVENT_COMMAND_CANCELLED, command=name, command_args=command_args)
+                self.cli_ctx.raise_event(EVENT_COMMAND_CANCELLED, command=name, command_args=command_args)
                 raise CLIError('Operation cancelled.')
             op = self.get_op_handler(operation)
-            client = client_factory(self.ctx, command_args) if client_factory else None
+            client = client_factory(self.cli_ctx, command_args) if client_factory else None
             result = op(client, **command_args) if client else op(**command_args)
             return result
 
@@ -375,7 +351,7 @@ class AzCommandsLoader(CLICommandsLoader):
         kwargs['arguments_loader'] = arguments_loader
         kwargs['description_loader'] = description_loader
 
-        return AzCliCommand(self.ctx, name, _command_handler, **kwargs)
+        return self.command_cls(self.cli_ctx, name, _command_handler, **kwargs)
 
 
     def get_op_handler(self, operation):
@@ -391,7 +367,7 @@ class AzCommandsLoader(CLICommandsLoader):
         for rt in ResourceType:
             if operation.startswith(rt.import_prefix):
                 operation = operation.replace(rt.import_prefix,
-                                              get_versioned_sdk_path(self.ctx.cloud.profile, rt))
+                                              get_versioned_sdk_path(self.cli_ctx.cloud.profile, rt))
 
         try:
             mod_to_import, attr_path = operation.split('#')
@@ -415,9 +391,9 @@ class AzCliCommandInvoker(CommandInvoker):
 
 
         # TODO: Can't simply be invoked as an event because args are transformed
-        args = _pre_command_table_create(self.ctx, argv)
+        args = _pre_command_table_create(self.cli_ctx, argv)
 
-        self.ctx.raise_event(events.EVENT_INVOKER_PRE_CMD_TBL_CREATE, args=args)
+        self.cli_ctx.raise_event(events.EVENT_INVOKER_PRE_CMD_TBL_CREATE, args=args)
         cmd_tbl = self.commands_loader.load_command_table(args)
         command = self._rudimentary_get_command(args)
         self.commands_loader.load_arguments(command)
@@ -425,12 +401,12 @@ class AzCliCommandInvoker(CommandInvoker):
             cmd_tbl = {command: self.commands_loader.command_table[command]} if command else cmd_tbl
         except KeyError:
             pass
-        self.ctx.raise_event(events.EVENT_INVOKER_POST_CMD_TBL_CREATE, cmd_tbl=cmd_tbl)
+        self.cli_ctx.raise_event(events.EVENT_INVOKER_POST_CMD_TBL_CREATE, cmd_tbl=cmd_tbl)
         self.parser.load_command_table(cmd_tbl)
-        self.ctx.raise_event(events.EVENT_INVOKER_CMD_TBL_LOADED, cmd_tbl=cmd_tbl, parser=self.parser)
+        self.cli_ctx.raise_event(events.EVENT_INVOKER_CMD_TBL_LOADED, cmd_tbl=cmd_tbl, parser=self.parser)
 
         if not args:
-            self.ctx.completion.enable_autocomplete(self.parser)
+            self.cli_ctx.completion.enable_autocomplete(self.parser)
             subparser = self.parser.subparsers[tuple()]
             self.help.show_welcome(subparser)
 
@@ -442,27 +418,21 @@ class AzCliCommandInvoker(CommandInvoker):
         if args[0].lower() == 'help':
             args[0] = '--help'
 
-        self.ctx.completion.enable_autocomplete(self.parser)
+        self.cli_ctx.completion.enable_autocomplete(self.parser)
 
-        self.ctx.raise_event(events.EVENT_INVOKER_PRE_PARSE_ARGS, args=args)
+        self.cli_ctx.raise_event(events.EVENT_INVOKER_PRE_PARSE_ARGS, args=args)
         parsed_args = self.parser.parse_args(args)
-        self.ctx.raise_event(events.EVENT_INVOKER_POST_PARSE_ARGS, command=parsed_args.command, args=parsed_args)
+        self.cli_ctx.raise_event(events.EVENT_INVOKER_POST_PARSE_ARGS, command=parsed_args.command, args=parsed_args)
 
 
         # TODO: This fundamentally alters the way Knack.invocation works here. Cannot be customized
         # with an event. Would need to be customized via inheritance.
         results = []
         for expanded_arg in _explode_list_args(parsed_args):
+
+            self._validation(expanded_arg)
+
             self.data['command'] = expanded_arg.command
-
-            try:
-                _validate_arguments(expanded_arg)
-            except CLIError:
-                raise
-            except:  # pylint: disable=bare-except
-                err = sys.exc_info()[1]
-                getattr(expanded_arg, '_parser', self.parser).validation_error(str(err))
-
 
             params = self._filter_params(expanded_arg)
 
@@ -478,7 +448,7 @@ class AzCliCommandInvoker(CommandInvoker):
                 if no_wait_param and getattr(expanded_arg, no_wait_param, False):
                     result = None
                 elif _is_poller(result):
-                    result = LongRunningOperation(self.ctx, 'Starting {}'.format(cmd.name))(result)
+                    result = LongRunningOperation(self.cli_ctx, 'Starting {}'.format(cmd.name))(result)
                 elif _is_paged(result):
                     result = todict(list(result))
                 else:
@@ -501,8 +471,8 @@ class AzCliCommandInvoker(CommandInvoker):
             results = results[0]
 
         event_data = {'result': results}
-        self.ctx.raise_event(events.EVENT_INVOKER_TRANSFORM_RESULT, event_data=event_data)
-        self.ctx.raise_event(events.EVENT_INVOKER_FILTER_RESULT, event_data=event_data)
+        self.cli_ctx.raise_event(events.EVENT_INVOKER_TRANSFORM_RESULT, event_data=event_data)
+        self.cli_ctx.raise_event(events.EVENT_INVOKER_FILTER_RESULT, event_data=event_data)
 
         return CommandResultItem(event_data['result'],
                                  table_transformer=cmd_tbl[parsed_args.command].table_transformer,

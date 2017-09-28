@@ -43,7 +43,7 @@ class LongRunningOperation(object):  # pylint: disable=too-few-public-methods
     def __init__(self, cli_ctx, start_msg='', finish_msg='',
                  poller_done_interval_ms=1000.0, progress_controller=None):
 
-        self.ctx = cli_ctx
+        self.cli_ctx = cli_ctx
         self.start_msg = start_msg
         self.finish_msg = finish_msg
         self.poller_done_interval_ms = poller_done_interval_ms
@@ -68,7 +68,7 @@ class LongRunningOperation(object):  # pylint: disable=too-few-public-methods
 
             odata_filters = "{} and {} eq '{}'".format(odata_filters, 'correlationId', correlation_id)
 
-            activity_log = get_mgmt_service_client(self.ctx, MonitorClient).activity_logs.list(filter=odata_filters)
+            activity_log = get_mgmt_service_client(self.cli_ctx, MonitorClient).activity_logs.list(filter=odata_filters)
 
             results = []
             max_events = 50  # default max value for events in list_activity_log
@@ -122,7 +122,7 @@ class LongRunningOperation(object):  # pylint: disable=too-few-public-methods
         self.progress_controller.begin()
         correlation_id = None
 
-        az_logger = self.ctx.logging
+        az_logger = self.cli_ctx.logging
         # TODO: Need a good way to actually get this....
         is_verbose = True
 
@@ -186,7 +186,7 @@ def _load_module_command_loader(loader, args, mod):
     module = import_module('azure.cli.command_modules.' + mod)
     module_loader = getattr(module, loader_name, None)
     if module_loader:
-        module_loader = module_loader(ctx=loader.ctx)
+        module_loader = module_loader(cli_ctx=loader.cli_ctx)
         module_command_table = module_loader.load_command_table(args)
         loader.command_table.update(module_command_table)
         loader.loaders.append(module_loader)  # this will be used later by the load_arguments method

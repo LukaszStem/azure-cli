@@ -100,7 +100,7 @@ def get_credential_types(cli_ctx):
 
 class Profile(object):
     def __init__(self, cli_ctx, storage=None, auth_ctx_factory=None, use_global_creds_cache=True):
-        self.ctx = cli_ctx
+        self.cli_ctx = cli_ctx
         self._storage = storage or ACCOUNT
         self.auth_ctx_factory = auth_ctx_factory or _AUTH_CTX_FACTORY
         if use_global_creds_cache:
@@ -124,7 +124,7 @@ class Profile(object):
         subscriptions = []
 
         if not subscription_finder:
-            subscription_finder = SubscriptionFinder(self.ctx,
+            subscription_finder = SubscriptionFinder(self.cli_ctx,
                                                      self.auth_ctx_factory,
                                                      self._creds_cache.adal_token_cache)
         if interactive:
@@ -155,7 +155,7 @@ class Profile(object):
         if allow_no_subscriptions:
             t_list = [s.tenant_id for s in subscriptions]
             bare_tenants = [t for t in subscription_finder.tenants if t not in t_list]
-            profile = Profile(self.ctx)
+            profile = Profile(self.cli_ctx)
             subscriptions = profile._build_tenant_level_accounts(bare_tenants)
             if not subscriptions:
                 return []
@@ -173,7 +173,7 @@ class Profile(object):
         arm_token_decoded = jwt.decode(arm_token, verify=False, algorithms=['RS256'])
         tenant = arm_token_decoded['tid']
         user_id = arm_token_decoded['unique_name'].split('#')[-1]
-        subscription_finder = SubscriptionFinder(self.ctx, self.auth_ctx_factory, None)
+        subscription_finder = SubscriptionFinder(self.cli_ctx, self.auth_ctx_factory, None)
         subscriptions = subscription_finder.find_from_raw_token(tenant, arm_token)
         consolidated = self._normalize_properties(user_id, subscriptions, is_service_principal=False)
         self._set_subscriptions(consolidated)
@@ -189,7 +189,7 @@ class Profile(object):
                 'expiresIn': '3600',
                 'expiresOn': str(datetime.utcnow() + timedelta(seconds=3600 * 24)),
                 'userId': t['unique_name'].split('#')[-1],
-                '_authority': self.ctx.cloud.endpoints.active_directory.rstrip('/') + '/' + t['tid'],
+                '_authority': self.cli_ctx.cloud.endpoints.active_directory.rstrip('/') + '/' + t['tid'],
                 'resource': t['aud'],
                 'isMRRT': True,
                 'accessToken': tokens[decoded_tokens.index(t)],
@@ -224,14 +224,14 @@ class Profile(object):
                 },
                 _IS_DEFAULT_SUBSCRIPTION: False,
                 _TENANT_ID: s.tenant_id,
-                _ENVIRONMENT_NAME: self.ctx.cloud.name
+                _ENVIRONMENT_NAME: self.cli_ctx.cloud.name
             })
         return consolidated
 
     def _build_tenant_level_accounts(self, tenants):
         from azure.cli.core.profiles import ResourceType, get_sdk
-        SubscriptionType = get_sdk(self.ctx, ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS, 'Subscription', mod='models')
-        StateType = get_sdk(self.ctx, ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS, 'SubscriptionState', mod='models')
+        SubscriptionType = get_sdk(self.cli_ctx, ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS, 'Subscription', mod='models')
+        StateType = get_sdk(self.cli_ctx, ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS, 'SubscriptionState', mod='models')
         result = []
         for t in tenants:
             s = self._new_account()
@@ -244,7 +244,7 @@ class Profile(object):
 
     def _new_account(self):
         from azure.cli.core.profiles import ResourceType, get_sdk
-        SubscriptionType, StateType = get_sdk(self.ctx, ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS, 'Subscription',
+        SubscriptionType, StateType = get_sdk(self.cli_ctx, ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS, 'Subscription',
                                               'SubscriptionState', mod='models')
         s = SubscriptionType()
         s.state = StateType.enabled
@@ -272,7 +272,7 @@ class Profile(object):
         existing_ones = self.load_cached_subscriptions(all_clouds=True)
         active_one = next((x for x in existing_ones if x.get(_IS_DEFAULT_SUBSCRIPTION)), None)
         active_subscription_id = active_one[_SUBSCRIPTION_ID] if active_one else None
-        active_cloud = self.ctx.cloud
+        active_cloud = self.cli_ctx.cloud
         default_sub_id = None
 
         # merge with existing ones
@@ -300,7 +300,7 @@ class Profile(object):
             new_active_one[_IS_DEFAULT_SUBSCRIPTION] = True
             default_sub_id = new_active_one[_SUBSCRIPTION_ID]
 
-            set_cloud_subscription(self.ctx, active_cloud.name, default_sub_id)
+            set_cloud_subscription(self.cli_ctx, active_cloud.name, default_sub_id)
         self._storage[_SUBSCRIPTIONS] = subscriptions
 
     @staticmethod
@@ -311,7 +311,7 @@ class Profile(object):
 
     def set_active_subscription(self, subscription):  # take id or name
         subscriptions = self.load_cached_subscriptions(all_clouds=True)
-        active_cloud = self.ctx.cloud
+        active_cloud = self.cli_ctx.cloud
         subscription = subscription.lower()
         result = [x for x in subscriptions
                   if subscription in [x[_SUBSCRIPTION_ID].lower(),
@@ -326,7 +326,7 @@ class Profile(object):
             s[_IS_DEFAULT_SUBSCRIPTION] = False
         result[0][_IS_DEFAULT_SUBSCRIPTION] = True
 
-        set_cloud_subscription(self.ctx, active_cloud.name, result[0][_SUBSCRIPTION_ID])
+        set_cloud_subscription(self.cli_ctx, active_cloud.name, result[0][_SUBSCRIPTION_ID])
         self._storage[_SUBSCRIPTIONS] = subscriptions
 
     def logout(self, user_or_sp):
@@ -344,7 +344,7 @@ class Profile(object):
 
     def load_cached_subscriptions(self, all_clouds=False):
         subscriptions = self._storage.get(_SUBSCRIPTIONS) or []
-        active_cloud = self.ctx.cloud
+        active_cloud = self.cli_ctx.cloud
         cached_subscriptions = [sub for sub in subscriptions
                                 if all_clouds or sub[_ENVIRONMENT_NAME] == active_cloud.name]
         # use deepcopy as we don't want to persist these changes to file.
@@ -385,7 +385,7 @@ class Profile(object):
         account = self.get_subscription(subscription_id)
         user_type = account[_USER_ENTITY][_USER_TYPE]
         username_or_sp_id = account[_USER_ENTITY][_USER_NAME]
-        resource = resource or self.ctx.cloud.endpoints.active_directory_resource_id
+        resource = resource or self.cli_ctx.cloud.endpoints.active_directory_resource_id
 
         def _retrieve_token():
             if account[_SUBSCRIPTION_NAME].startswith(_MSI_ACCOUNT_NAME):
@@ -407,7 +407,7 @@ class Profile(object):
         account = self.get_subscription(subscription)
         user_type = account[_USER_ENTITY][_USER_TYPE]
         username_or_sp_id = account[_USER_ENTITY][_USER_NAME]
-        resource = resource or self.ctx.cloud.endpoints.active_directory_resource_id
+        resource = resource or self.cli_ctx.cloud.endpoints.active_directory_resource_id
 
         if user_type == _USER:
             _, _, token_entry = self._creds_cache.retrieve_token_for_user(
@@ -421,7 +421,7 @@ class Profile(object):
         account = self.get_subscription(subscription)
         user_type = account[_USER_ENTITY][_USER_TYPE]
         username_or_sp_id = account[_USER_ENTITY][_USER_NAME]
-        resource = resource or self.ctx.cloud.endpoints.active_directory_resource_id
+        resource = resource or self.cli_ctx.cloud.endpoints.active_directory_resource_id
 
         if user_type == _USER:
             creds = self._creds_cache.retrieve_token_for_user(username_or_sp_id,
@@ -440,7 +440,7 @@ class Profile(object):
 
         from azure.cli.core._debug import allow_debug_adal_connection
         allow_debug_adal_connection()
-        subscription_finder = subscription_finder or SubscriptionFinder(self.ctx,
+        subscription_finder = subscription_finder or SubscriptionFinder(self.cli_ctx,
                                                                         self.auth_ctx_factory,
                                                                         self._creds_cache.adal_token_cache)
         refreshed_list = set()
@@ -524,7 +524,7 @@ class Profile(object):
         endpoint_mappings['management'] = 'managementEndpointUrl'
 
         for e in endpoint_mappings:
-            result[endpoint_mappings[e]] = getattr(get_active_cloud(self.ctx).endpoints, e)
+            result[endpoint_mappings[e]] = getattr(get_active_cloud(self.cli_ctx).endpoints, e)
         return result
 
     def get_installation_id(self):
@@ -578,7 +578,7 @@ class SubscriptionFinder(object):
         self._adal_token_cache = adal_token_cache
         self._auth_context_factory = auth_context_factory
         self.user_id = None  # will figure out after log user in
-        self.ctx = cli_ctx
+        self.cli_ctx = cli_ctx
 
         def create_arm_client_factory(credentials):
             if arm_client_factory:
@@ -589,7 +589,7 @@ class SubscriptionFinder(object):
             client_type = get_client_class(ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS)
             api_version = get_api_version(cli_ctx, ResourceType.MGMT_RESOURCE_SUBSCRIPTIONS)
             return change_ssl_cert_verification(client_type(credentials, api_version=api_version,
-                                                            base_url=self.ctx.cloud.endpoints.resource_manager))
+                                                            base_url=self.cli_ctx.cloud.endpoints.resource_manager))
 
         self._arm_client_factory = create_arm_client_factory
         self.tenants = []
@@ -638,7 +638,7 @@ class SubscriptionFinder(object):
 
     def _create_auth_context(self, tenant, use_token_cache=True):
         token_cache = self._adal_token_cache if use_token_cache else None
-        return self._auth_context_factory(self.ctx, tenant, token_cache)
+        return self._auth_context_factory(self.cli_ctx, tenant, token_cache)
 
     def _find_using_common_tenant(self, access_token, resource):
         import adal

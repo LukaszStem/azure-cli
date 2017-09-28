@@ -39,7 +39,7 @@ class TestCommandWithConfiguredDefaults(unittest.TestCase):
 
             def load_command_table(self, args):
                 super(TestCommandsLoader, self).load_command_table(args)
-                command = AzCliCommand(self.ctx, 'test sample-vm-list', sample_vm_list)
+                command = AzCliCommand(self.cli_ctx, 'test sample-vm-list', sample_vm_list)
                 command.add_argument('resource_group_name', ('--resource-group-name', '-g'),
                                      configured_default='group', required=required_arg)
                 self.command_table['test sample-vm-list'] = command

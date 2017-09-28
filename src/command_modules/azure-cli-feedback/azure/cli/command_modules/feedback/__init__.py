@@ -11,8 +11,8 @@ import azure.cli.command_modules.feedback._help  # pylint: disable=unused-import
 
 class FeedbackCommandsLoader(AzCommandsLoader):
 
-    def __init__(self, ctx=None):
-        super(FeedbackCommandsLoader, self).__init__(ctx=ctx)
+    def __init__(self, cli_ctx=None):
+        super(FeedbackCommandsLoader, self).__init__(cli_ctx=cli_ctx)
         self.module_name = __name__
 
 

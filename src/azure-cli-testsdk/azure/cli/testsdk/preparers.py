@@ -22,7 +22,7 @@ class ResourceGroupPreparer(AbstractPreparer, SingleValueReplacer):
                  random_name_length=75):
         super(ResourceGroupPreparer, self).__init__(name_prefix, random_name_length)
         from azure.cli.testsdk import TestCli
-        self.ctx = TestCli()
+        self.cli_ctx = TestCli()
         self.location = location
         self.parameter_name = parameter_name
         self.parameter_name_for_location = parameter_name_for_location
@@ -37,12 +37,12 @@ class ResourceGroupPreparer(AbstractPreparer, SingleValueReplacer):
 
 
         template = 'az group create --location {} --name {} --tag use=az-test'
-        execute(self.ctx, template.format(self.location, name))
+        execute(self.cli_ctx, template.format(self.location, name))
         return {self.parameter_name: name, self.parameter_name_for_location: self.location}
 
     def remove_resource(self, name, **kwargs):
         if not self.dev_setting_name:
-            execute(self.ctx, 'az group delete --name {} --yes --no-wait'.format(name))
+            execute(self.cli_ctx, 'az group delete --name {} --yes --no-wait'.format(name))
 
 
 # Storage Account Preparer and its shorthand decorator
@@ -53,7 +53,7 @@ class StorageAccountPreparer(AbstractPreparer, SingleValueReplacer):
                  dev_setting_name='AZURE_CLI_TEST_DEV_STORAGE_ACCOUNT_NAME'):
         super(StorageAccountPreparer, self).__init__(name_prefix, 24)
         from azure.cli.testsdk import TestCli
-        self.ctx = TestCli()
+        self.cli_ctx = TestCli()
         self.location = location
         self.sku = sku
         self.resource_group_parameter_name = resource_group_parameter_name
@@ -77,18 +77,18 @@ class StorageAccountPreparer(AbstractPreparer, SingleValueReplacer):
                 template = 'az storage account create -n {} -g {} -l {} --account-type {}'
             else:
                 template = 'az storage account create -n {} -g {} -l {} --sku {}'
-            execute(self.ctx, template.format(name, group, self.location, self.sku))
+            execute(self.cli_ctx, template.format(name, group, self.location, self.sku))
         else:
             name = self.dev_setting_name
 
-        account_key = execute(self.ctx, 'storage account keys list -n {} -g {} --query "[0].value" -otsv'
+        account_key = execute(self.cli_ctx, 'storage account keys list -n {} -g {} --query "[0].value" -otsv'
                               .format(name, group)).output
         return {self.parameter_name: name, self.parameter_name + '_info': (name, account_key)}
 
     def remove_resource(self, name, **kwargs):
         if not self.skip_delete and not self.dev_setting_name:
             group = self._get_resource_group(**kwargs)
-            execute(self.ctx, 'az storage account delete -n {} -g {} --yes'.format(name, group))
+            execute(self.cli_ctx, 'az storage account delete -n {} -g {} --yes'.format(name, group))
 
     def _get_resource_group(self, **kwargs):
         try:
@@ -107,7 +107,7 @@ class KeyVaultPreparer(AbstractPreparer, SingleValueReplacer):
                  dev_setting_name='AZURE_CLI_TEST_DEV_KEY_VAULT_NAME'):
         super(KeyVaultPreparer, self).__init__(name_prefix, 24)
         from azure.cli.testsdk import TestCli
-        self.ctx = TestCli()
+        self.cli_ctx = TestCli()
         self.location = location
         self.sku = sku
         self.resource_group_parameter_name = resource_group_parameter_name
@@ -120,7 +120,7 @@ class KeyVaultPreparer(AbstractPreparer, SingleValueReplacer):
         if not self.dev_setting_name:
             group = self._get_resource_group(**kwargs)
             template = 'az keyvault create -n {} -g {} -l {} --sku {}'
-            execute(self.ctx, template.format(name, group, self.location, self.sku))
+            execute(self.cli_ctx, template.format(name, group, self.location, self.sku))
             return {self.parameter_name: name}
 
         return {self.parameter_name: self.dev_setting_name}
@@ -128,7 +128,7 @@ class KeyVaultPreparer(AbstractPreparer, SingleValueReplacer):
     def remove_resource(self, name, **kwargs):
         if not self.skip_delete and not self.dev_setting_name:
             group = self._get_resource_group(**kwargs)
-            execute(self.ctx, 'az keyvault delete -n {} -g {} --yes'.format(name, group))
+            execute(self.cli_ctx, 'az keyvault delete -n {} -g {} --yes'.format(name, group))
 
     def _get_resource_group(self, **kwargs):
         try:
@@ -148,7 +148,7 @@ class RoleBasedServicePrincipalPreparer(AbstractPreparer, SingleValueReplacer):
                  dev_setting_sp_password='AZURE_CLI_TEST_DEV_SP_PASSWORD'):
         super(RoleBasedServicePrincipalPreparer, self).__init__(name_prefix, 24)
         from azure.cli.testsdk import TestCli
-        self.ctx = TestCli()
+        self.cli_ctx = TestCli()
         self.skip_assignment = skip_assignment
         self.result = {}
         self.parameter_name = parameter_name
@@ -160,7 +160,7 @@ class RoleBasedServicePrincipalPreparer(AbstractPreparer, SingleValueReplacer):
         if not self.dev_setting_sp_name:
             command = 'az ad sp create-for-rbac -n {}{}' \
                 .format(name, ' --skip-assignment' if self.skip_assignment else '')
-            self.result = execute(self.ctx, command).get_output_in_json()
+            self.result = execute(self.cli_ctx, command).get_output_in_json()
             return {self.parameter_name: name, self.parameter_password: self.result['password']}
 
         return {self.parameter_name: self.dev_setting_sp_name,
@@ -168,7 +168,7 @@ class RoleBasedServicePrincipalPreparer(AbstractPreparer, SingleValueReplacer):
 
     def remove_resource(self, name, **kwargs):
         if not self.dev_setting_sp_name:
-            execute(self.ctx, 'az ad sp delete --id {}'.format(self.result['appId']))
+            execute(self.cli_ctx, 'az ad sp delete --id {}'.format(self.result['appId']))
 
 
 # Utility

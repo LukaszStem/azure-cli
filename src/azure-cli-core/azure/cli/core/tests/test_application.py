@@ -40,7 +40,7 @@ class TestApplication(unittest.TestCase):
 
             def load_command_table(self, args):
                 super(TestCommandsLoader, self).load_command_table(args)
-                self.command_table = {'test': AzCliCommand(self.ctx, 'test', _handler)}
+                self.command_table = {'test': AzCliCommand(self.cli_ctx, 'test', _handler)}
                 return self.command_table
 
         cli = TestCli(commands_loader_cls=TestCommandsLoader)

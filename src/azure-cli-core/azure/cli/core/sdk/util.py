@@ -8,11 +8,12 @@ from azure.cli.core.profiles._shared import get_versioned_sdk_path
 
 from knack.arguments import ignore_type, ArgumentsContext
 from knack.commands import CommandSuperGroup, CommandGroup as KnackCommandGroup, CLICommandsLoader
+from knack.util import CLIError
 
 # COMMANDS UTILITIES
 
 CLI_COMMAND_KWARGS = ['transform', 'table_transformer', 'confirmation', 'exception_handler', 'min_api', 'max_api',
-                      'client_factory', 'operations_tmpl', 'no_wait_param']
+                      'client_factory', 'operations_tmpl', 'no_wait_param', 'validator']
 
 
 class CliCommandType(object):
@@ -32,6 +33,7 @@ class CliCommandType(object):
         self.settings.update(**kwargs)
 
 class _CommandGroup(KnackCommandGroup):
+
     def __init__(self, module_name, command_loader, group_name, command_type=None, **kwargs):
         if command_type:
             if not isinstance(command_type, CliCommandType):
@@ -55,16 +57,16 @@ class _CommandGroup(KnackCommandGroup):
         Register a CLI command
         :param name: Name of the command as it will be called on the command line
         :type name: str
-        :param method_name: Name of the method the command maps to on the service adapter
+        :param method_name: Name of the method the command maps to
         :type method_name: str
         :param command_type: CliCommandType object containing settings to apply to the entire command group
         :type command_type: CliCommandType
         :param kwargs: Keyword arguments. Supported keyword arguments include:
+            - confirmation: Prompt prior to the action being executed. This is useful if the action
+                            would cause a loss of data. (bool)
             - transform: Transform function for transforming the output of the command (function)
             - table_transformer: Transform function or JMESPath query to be applied to table output to create a
                                  better output format for tables. (function or string)
-            - confirmation: Prompt prior to the action being executed. This is useful if the action
-                            would cause a loss of data. (bool)
             - exception_handler: Exception handler for handling non-standard exceptions (function)
             - resource_type: The ResourceType enum value to use with min or max API.
             - min_api: Minimum API version required for commands within the group (string)
@@ -88,36 +90,31 @@ class _CommandGroup(KnackCommandGroup):
         self.command_loader._cli_command(command_name,
                                          operations_tmpl.format(method_name), **merged_kwargs)
 
-    def custom_command(self, name, custom_func_name, confirmation=None,
-                       exception_handler=None, deprecate_info=None, no_wait_param=None):
-        command_path = operations_tmpl.format(method_name)
 
-        # Patch the unversioned SDK path to include the appropriate API version for the resource in question.
-        for rt in ResourceType:
-            if command_path.startswith(rt.import_prefix):
-                command_path = command_path.replace(rt.import_prefix,
-                                                    get_versioned_sdk_path(self.command_loader.ctx.cloud.profile, rt))
-                break
-        self.command_loader._cli_command('{} {}'.format(self.group_name, name) if self.group_name else name,
-                                         command_path,
-                                         **merged_command_type.settings)
+    def generic_update_command(self, name,
+                               getter_name='get', getter_type=None,
+                               setter_name='create_or_update', setter_type=None, setter_arg_name='parameters', 
+                               custom_func_name=None, custom_func_type=None,
+                               child_collection_prop_name=None, child_collection_key='name', child_arg_name='item_name',
+                               **kwargs):
+        if bool(custom_func_name) != bool(custom_func_type):
+            raise CLIError('Command authoring error: to enable custom arguments, both `custom_func_name` and '
+                            '`custom_func_type` must be provided.')
+        elif custom_func_name:
+            # TODO: Make this work
+            custom_function_op = None
 
-    # TODO: This needs to have a getter and setter command_type and a custom command_type
-    #def generic_update_command(self, name, getter_name, setter_name, custom_func_name=None,
-    #                           setter_arg_name='parameters'):
-    #    if custom_func_name:
-    #        custom_function_op = self._custom_path.format(custom_func_name)
-    #    else:
-    #        custom_function_op = None
+        self.command_loader.cli_generic_update_command(
+            self.module_name,
+            '{} {}'.format(self.group_name, name),
+            self.operations_tmpl.format(getter_name),
+            self.operations_tmpl.format(setter_name),
+            factory=self._client_factory,
+            custom_function_op=custom_function_op,
+            setter_arg_name=setter_arg_name)
 
-    #    self.command_loader.cli_generic_update_command(
-    #        self.module_name,
-    #        '{} {}'.format(self.group_name, name),
-    #        self.operations_tmpl.format(getter_name),
-    #        self.operations_tmpl.format(setter_name),
-    #        factory=self._client_factory,
-    #        custom_function_op=custom_function_op,
-    #        setter_arg_name=setter_arg_name)
+    def generic_wait_command(self, name, getter_name, command_type=None, **kwargs):
+        pass
 
 
 # PARAMETERS UTILITIES
@@ -146,9 +143,10 @@ class _ParametersContext(ArgumentsContext):
 
     def argument(self, argument_name, arg_type=None, **kwargs):
         kwargs.update(self.group_kwargs)
-        self.command_loader._register_cli_argument(self.commmand, argument_name, arg_type=arg_type, **kwargs)        
+        super(_ParametersContext, self).argument(argument_name, arg_type=arg_type, **kwargs)
 
     def alias(self, argument_name, options_list, **kwargs):
+        kwargs.update(self.group_kwargs)
         super(_ParametersContext, self).register_alias(argument_name, options_list, **kwargs)
 
     def expand(self, argument_name, model_type, group_name=None, patches=None):

@@ -365,9 +365,9 @@ def cli_generic_update_command(context, module_name, name, getter_op, setter_op,
             del args[item]
 
         try:
-            client = factory(context.ctx) if factory else None
+            client = factory(context.cli_ctx) if factory else None
         except TypeError:
-            client = factory(context.ctx, None) if factory else None
+            client = factory(context.cli_ctx, None) if factory else None
 
         getterargs = {key: val for key, val in args.items() if key in get_arguments_loader()}
         getter = context.get_op_handler(getter_op)
@@ -452,7 +452,7 @@ def cli_generic_update_command(context, module_name, name, getter_op, setter_op,
                 setattr(namespace, 'ordered_arguments', [])
             namespace.ordered_arguments.append((option_string, values))
 
-    cmd = AzCliCommand(context.ctx, name, handler, table_transformer=table_transformer,
+    cmd = AzCliCommand(context.cli_ctx, name, handler, table_transformer=table_transformer,
                        arguments_loader=arguments_loader, formatter_class=formatter_class)
     group_name = 'Generic Update'
     cmd.add_argument('properties_to_set', '--set', nargs='+', action=OrderedArgsAction, default=[],
@@ -503,9 +503,9 @@ def cli_generic_wait_command(context, module_name, name, getter_op, factory=None
         from msrest.exceptions import ClientException
         import time
         try:
-            client = factory(context.ctx) if factory else None
+            client = factory(context.cli_ctx) if factory else None
         except TypeError:
-            client = factory(context.ctx, None) if factory else None
+            client = factory(context.cli_ctx, None) if factory else None
 
         getterargs = {key: val for key, val in args.items()
                       if key in get_arguments_loader()}
@@ -553,7 +553,7 @@ def cli_generic_wait_command(context, module_name, name, getter_op, factory=None
 
         return CLIError('Wait operation timed-out after {} seconds'.format(timeout))
 
-    cmd = AzCliCommand(context.ctx, name, handler, arguments_loader=arguments_loader)
+    cmd = AzCliCommand(context.cli_ctx, name, handler, arguments_loader=arguments_loader)
     group_name = 'Wait Condition'
     cmd.add_argument('timeout', '--timeout', default=3600, arg_group=group_name, type=int,
                      help='maximum wait in seconds')

@@ -47,9 +47,9 @@ Here are the base commands:
 
 class AzCliHelp(CLIHelp):
 
-    def __init__(self, ctx):
-        self.ctx = ctx
-        super(AzCliHelp, self).__init__(ctx, PRIVACY_STATEMENT, WELCOME_MESSAGE)
+    def __init__(self, cli_ctx):
+        self.cli_ctx = cli_ctx
+        super(AzCliHelp, self).__init__(cli_ctx, PRIVACY_STATEMENT, WELCOME_MESSAGE)
 
 
 # TODO: This is different for CLI Extensions!

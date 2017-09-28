@@ -569,7 +569,7 @@ def load_command_table(self, args):
         g.command('delete', 'delete')
         g.command('show', 'get', exception_handler=empty_on_404)
         g.command('list', 'list_vnet', network_custom)
-        #if supported_api_version(self.ctx, ResourceType.MGMT_NETWORK, min_api='2016-09-01'):
+        #if supported_api_version(self.cli_ctx, ResourceType.MGMT_NETWORK, min_api='2016-09-01'):
         #    self.cli_command(__name__, 'network vnet check-ip-address', vnet_path + 'check_ip_address_availability', client_factory=cf_virtual_networks)
         g.command('create', 'create_vnet', network_custom, transform=transform_vnet_create_output)
         #self.cli_generic_update_command(__name__, 'network vnet update',

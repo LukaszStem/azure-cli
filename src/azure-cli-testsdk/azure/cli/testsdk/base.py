@@ -30,7 +30,7 @@ class ScenarioTest(ReplayableTest):
     def __init__(self, method_name, config_file=None, recording_name=None,
                  recording_processors=None, replay_processors=None, recording_patches=None, replay_patches=None):
         from azure.cli.testsdk import TestCli
-        self.ctx = TestCli()
+        self.cli_ctx = TestCli()
         self.name_replacer = GeneralNameReplacer()
         self.kwargs = {}
         super(ScenarioTest, self).__init__(
@@ -59,7 +59,7 @@ class ScenarioTest(ReplayableTest):
                 patch_retrieve_token_for_user,
                 patch_progress_controller,
             ],
-            recording_dir=find_recording_dir(self.ctx, inspect.getfile(self.__class__)),
+            recording_dir=find_recording_dir(self.cli_ctx, inspect.getfile(self.__class__)),
             recording_name=recording_name
         )
 
@@ -75,7 +75,7 @@ class ScenarioTest(ReplayableTest):
         return moniker
 
     def cmd(self, command, checks=None, expect_failure=False):
-        return execute(self.ctx, command.format(**self.kwargs), expect_failure=expect_failure).assert_with_checks(checks)
+        return execute(self.cli_ctx, command.format(**self.kwargs), expect_failure=expect_failure).assert_with_checks(checks)
 
     def get_subscription_id(self):
         if self.in_recording or self.is_live:
@@ -89,7 +89,7 @@ class ScenarioTest(ReplayableTest):
 class LiveScenarioTest(IntegrationTestBase):
 
     def cmd(self, command, checks=None, expect_failure=False):
-        return execute(self.ctx, command, expect_failure=expect_failure).assert_with_checks(checks)
+        return execute(self.cli_ctx, command, expect_failure=expect_failure).assert_with_checks(checks)
 
 
 class ExecutionResult(object):

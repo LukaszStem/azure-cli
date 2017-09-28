@@ -18,21 +18,6 @@ from knack.util import CLIError
 
 logger = get_logger(__name__)
 
-ARGPARSE_SUPPORTED_KWARGS = [
-    'option_strings',
-    'dest',
-    'nargs',
-    'const',
-    'default',
-    'type',
-    'choices',
-    'help',
-    'metavar',
-    'required',
-    'action'
-]
-
-
 class IncorrectUsageError(CLIError):
     '''Raised when a command is incorrectly used and the usage should be
     displayed to the user.
@@ -49,17 +34,11 @@ def enable_autocomplete(parser):
 class AzCliCommandParser(CLICommandParser):
     """ArgumentParser implementation specialized for the Azure CLI utility."""
 
-    def __init__(self, ctx=None, **kwargs):
+    def __init__(self, cli_ctx=None, **kwargs):
         self.command_source = kwargs.pop('_command_source', None)
-        super(AzCliCommandParser, self).__init__(ctx, **kwargs)
+        super(AzCliCommandParser, self).__init__(cli_ctx, **kwargs)
 
-    def _add_argument(self, obj, arg):
-        # TODO: This logic should be part of knack, not az
-        options_list = arg.options_list
-        argparse_options = {name: value for name, value in arg.options.items() if name in ARGPARSE_SUPPORTED_KWARGS}
-        return obj.add_argument(*options_list, **argparse_options)
-
-    # TODO: If not for _add_argument this would not need to be overridden with 99% same implementation
+    # TODO: If not for _command_source this would not need to be overridden with 99% same implementation
     def load_command_table(self, cmd_tbl):
         """Load a command table into our parser."""
         # If we haven't already added a subparser, we
@@ -87,6 +66,7 @@ class AzCliCommandParser(CLICommandParser):
                                                   formatter_class=fc,
                                                   _command_source=metadata.command_source)
 
+            command_validator = metadata.validator
             argument_validators = []
             argument_groups = {}
             for arg in metadata.arguments.values():
@@ -100,15 +80,16 @@ class AzCliCommandParser(CLICommandParser):
                         group_name = '{} Arguments'.format(arg.arg_group)
                         group = command_parser.add_argument_group(arg.arg_group, group_name)
                         argument_groups[arg.arg_group] = group
-                    param = self._add_argument(group, arg)
+                    param = CLICommandParser._add_argument(group, arg)
                 else:
-                    param = self._add_argument(command_parser, arg)
+                    param = CLICommandParser._add_argument(command_parser, arg)
                 param.completer = arg.completer
 
             command_parser.set_defaults(
                 func=metadata,
                 command=command_name,
-                _validators=argument_validators,
+                _command_validator=command_validator,
+                _argument_validators=argument_validators,
                 _parser=command_parser)
 
     def _handle_command_package_error(self, err_msg):  # pylint: disable=no-self-use

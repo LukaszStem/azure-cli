@@ -11,8 +11,8 @@ import azure.cli.command_modules.resource._help  # pylint: disable=unused-import
 
 class ResourceCommandsLoader(AzCommandsLoader):
 
-    def __init__(self, ctx=None):
-        super(ResourceCommandsLoader, self).__init__(ctx=ctx)
+    def __init__(self, cli_ctx=None):
+        super(ResourceCommandsLoader, self).__init__(cli_ctx=cli_ctx)
         self.module_name = __name__
         self.default_resource_type = ResourceType.MGMT_RESOURCE_RESOURCES
 
