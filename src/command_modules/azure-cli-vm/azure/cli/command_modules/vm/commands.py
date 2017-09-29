@@ -13,7 +13,7 @@ from azure.cli.command_modules.vm._client_factory import (cf_vm, cf_avail_set, c
                                                           cf_images, cf_run_commands)
 from azure.cli.core.commands import DeploymentOutputLongRunningOperation, cli_command
 from azure.cli.core.commands.arm import \
-    (cli_generic_update_command, cli_generic_wait_command, handle_long_running_operation_exception,
+    (_cli_generic_update_command, _cli_generic_wait_command, handle_long_running_operation_exception,
      deployment_validate_table_format)
 from azure.cli.core.util import empty_on_404
 from azure.cli.core.profiles import supported_api_version, ResourceType
@@ -131,12 +131,12 @@ cli_command(__name__, 'vm resize', custom_path.format('resize_vm'), no_wait_para
 cli_command(__name__, 'vm capture', custom_path.format('capture_vm'))
 cli_command(__name__, 'vm open-port', custom_path.format('vm_open_port'))
 cli_command(__name__, 'vm format-secret', custom_path.format('get_vm_format_secret'))
-cli_generic_update_command(__name__, 'vm update',
+_cli_generic_update_command(__name__, 'vm update',
                            mgmt_path.format(op_var, op_class, 'get'),
                            mgmt_path.format(op_var, op_class, 'create_or_update'),
                            cf_vm,
                            no_wait_param='raw')
-cli_generic_wait_command(__name__, 'vm wait', 'azure.cli.command_modules.vm.custom#get_instance_view')
+_cli_generic_wait_command(__name__, 'vm wait', 'azure.cli.command_modules.vm.custom#get_instance_view')
 if supported_api_version(ResourceType.MGMT_COMPUTE, min_api='2017-03-30'):
     cli_command(__name__, 'vm perform-maintenance', mgmt_path.format(op_var, op_class, 'perform_maintenance'), cf_vm)
 
@@ -184,15 +184,15 @@ cli_command(__name__, 'vm availability-set list-sizes', mgmt_path.format(op_var,
 if supported_api_version(ResourceType.MGMT_COMPUTE, min_api='2016-04-30-preview'):
     cli_command(__name__, 'vm availability-set convert', custom_path.format('convert_av_set_to_managed_disk'))
 
-cli_generic_update_command(__name__, 'vm availability-set update',
+_cli_generic_update_command(__name__, 'vm availability-set update',
                            custom_path.format('availset_get'),
                            custom_path.format('availset_set'))
 
-cli_generic_update_command(__name__, 'vmss update',
+_cli_generic_update_command(__name__, 'vmss update',
                            custom_path.format('vmss_get'),
                            custom_path.format('vmss_set'),
                            no_wait_param='no_wait')
-cli_generic_wait_command(__name__, 'vmss wait', custom_path.format('vmss_get'))
+_cli_generic_wait_command(__name__, 'vmss wait', custom_path.format('vmss_get'))
 
 # VM Boot Diagnostics
 cli_command(__name__, 'vm boot-diagnostics disable', custom_path.format('disable_boot_diagnostics'))
@@ -304,11 +304,11 @@ if supported_api_version(ResourceType.MGMT_COMPUTE, min_api='2017-03-30'):
     cli_command(__name__, 'disk delete', mgmt_path.format(op_var, op_class, 'delete'), cf_disks, no_wait_param='raw', confirmation=True)
     cli_command(__name__, 'disk grant-access', custom_path.format('grant_disk_access'))
     cli_command(__name__, 'disk revoke-access', mgmt_path.format(op_var, op_class, 'revoke_access'), cf_disks)
-    cli_generic_update_command(__name__, 'disk update', 'azure.mgmt.compute.operations.{}#{}.get'.format(op_var, op_class),
+    _cli_generic_update_command(__name__, 'disk update', 'azure.mgmt.compute.operations.{}#{}.get'.format(op_var, op_class),
                                'azure.mgmt.compute.operations.{}#{}.create_or_update'.format(op_var, op_class),
                                custom_function_op=custom_path.format('update_managed_disk'),
                                setter_arg_name='disk', factory=cf_disks, no_wait_param='raw')
-    cli_generic_wait_command(__name__, 'disk wait', 'azure.mgmt.compute.operations.{}#{}.get'.format(op_var, op_class), cf_disks)
+    _cli_generic_wait_command(__name__, 'disk wait', 'azure.mgmt.compute.operations.{}#{}.get'.format(op_var, op_class), cf_disks)
 
     op_var = 'snapshots_operations'
     op_class = 'SnapshotsOperations'
@@ -318,7 +318,7 @@ if supported_api_version(ResourceType.MGMT_COMPUTE, min_api='2017-03-30'):
     cli_command(__name__, 'snapshot delete', mgmt_path.format(op_var, op_class, 'delete'), cf_snapshots)
     cli_command(__name__, 'snapshot grant-access', custom_path.format('grant_snapshot_access'))
     cli_command(__name__, 'snapshot revoke-access', mgmt_path.format(op_var, op_class, 'revoke_access'), cf_snapshots)
-    cli_generic_update_command(__name__, 'snapshot update', 'azure.mgmt.compute.operations.{}#{}.get'.format(op_var, op_class),
+    _cli_generic_update_command(__name__, 'snapshot update', 'azure.mgmt.compute.operations.{}#{}.get'.format(op_var, op_class),
                                'azure.mgmt.compute.operations.{}#{}.create_or_update'.format(op_var, op_class),
                                custom_function_op=custom_path.format('update_snapshot'),
                                setter_arg_name='snapshot', factory=cf_snapshots)

@@ -85,7 +85,7 @@ class GenericUpdateTest(unittest.TestCase):
 
                 setattr(sys.modules[__name__], my_get.__name__, my_get)
                 setattr(sys.modules[__name__], my_set.__name__, my_set)
-                self.cli_generic_update_command(None, 'update-obj', '{}#{}'.format(__name__, my_get.__name__), '{}#{}'.format(__name__, my_set.__name__))
+                self._cli_generic_update_command(None, 'update-obj', '{}#{}'.format(__name__, my_get.__name__), '{}#{}'.format(__name__, my_set.__name__))
                 return self.command_table
 
         cli = TestCli(commands_loader_cls=GenericUpdateTestCommandsLoader)
@@ -202,7 +202,7 @@ class GenericUpdateTest(unittest.TestCase):
 
                 setattr(sys.modules[__name__], my_get.__name__, my_get)
                 setattr(sys.modules[__name__], my_set.__name__, my_set)
-                self.cli_generic_update_command(None, 'gencommand', '{}#{}'.format(__name__, my_get.__name__), '{}#{}'.format(__name__, my_set.__name__))
+                self._cli_generic_update_command(None, 'gencommand', '{}#{}'.format(__name__, my_get.__name__), '{}#{}'.format(__name__, my_set.__name__))
                 return self.command_table
 
         cli = TestCli(commands_loader_cls=GenericUpdateTestCommandsLoader)
@@ -299,7 +299,7 @@ class GenericUpdateTest(unittest.TestCase):
 
                 setattr(sys.modules[__name__], my_get.__name__, my_get)
                 setattr(sys.modules[__name__], my_set.__name__, my_set)
-                self.cli_generic_update_command(None, 'gencommand', '{}#{}'.format(__name__, my_get.__name__), '{}#{}'.format(__name__, my_set.__name__))
+                self._cli_generic_update_command(None, 'gencommand', '{}#{}'.format(__name__, my_get.__name__), '{}#{}'.format(__name__, my_set.__name__))
                 return self.command_table
 
         cli = TestCli(commands_loader_cls=GenericUpdateTestCommandsLoader)

@@ -6,7 +6,7 @@
 # pylint: disable=line-too-long
 
 from azure.cli.core.commands import cli_command
-from azure.cli.core.commands.arm import cli_generic_update_command
+from azure.cli.core.commands.arm import _cli_generic_update_command
 from azure.cli.core.profiles import supported_api_version, PROFILE_TYPE
 from ._client_factory import \
     (cf_alert_rules, cf_metrics, cf_metric_def, cf_alert_rule_incidents, cf_log_profiles,
@@ -29,7 +29,7 @@ if not supported_api_version(PROFILE_TYPE, max_api='2017-03-09-profile'):
     monitor_command(__name__, 'monitor alert delete', ar_path + 'delete', cf_alert_rules)
     monitor_command(__name__, 'monitor alert show', ar_path + 'get', cf_alert_rules)
     monitor_command(__name__, 'monitor alert list', ar_path + 'list_by_resource_group', cf_alert_rules)
-    cli_generic_update_command(__name__, 'monitor alert update',
+    _cli_generic_update_command(__name__, 'monitor alert update',
                                ar_path + 'get', ar_path + 'create_or_update', cf_alert_rules,
                                custom_function_op=custom_path + 'update_metric_rule',
                                exception_handler=monitor_exception_handler)
@@ -54,7 +54,7 @@ if not supported_api_version(PROFILE_TYPE, max_api='2017-03-09-profile'):
     monitor_command(__name__, 'monitor log-profiles delete', lp_path + 'delete', cf_log_profiles)
     monitor_command(__name__, 'monitor log-profiles show', lp_path + 'get', cf_log_profiles)
     monitor_command(__name__, 'monitor log-profiles list', lp_path + 'list', cf_log_profiles)
-    cli_generic_update_command(__name__, 'monitor log-profiles update',
+    _cli_generic_update_command(__name__, 'monitor log-profiles update',
                                lp_path + 'get', lp_path + 'create_or_update', cf_log_profiles,
                                exception_handler=monitor_exception_handler)
 
@@ -65,7 +65,7 @@ if not supported_api_version(PROFILE_TYPE, max_api='2017-03-09-profile'):
     diag_path = 'azure.mgmt.monitor.operations.service_diagnostic_settings_operations#ServiceDiagnosticSettingsOperations.'
     monitor_command(__name__, 'monitor diagnostic-settings create', custom_path + 'create_diagnostics_settings', cf_diagnostics)
     monitor_command(__name__, 'monitor diagnostic-settings show', diag_path + 'get', cf_diagnostics)
-    cli_generic_update_command(__name__, 'monitor diagnostic-settings update',
+    _cli_generic_update_command(__name__, 'monitor diagnostic-settings update',
                                diag_path + 'get', diag_path + 'create_or_update', cf_diagnostics,
                                exception_handler=monitor_exception_handler)
 
@@ -80,7 +80,7 @@ if not supported_api_version(PROFILE_TYPE, max_api='2017-03-09-profile'):
     monitor_command(__name__, 'monitor autoscale-settings show', autoscale_path + 'get', cf_autoscale)
     monitor_command(__name__, 'monitor autoscale-settings list', autoscale_path + 'list_by_resource_group', cf_autoscale)
     monitor_command(__name__, 'monitor autoscale-settings get-parameters-template', custom_path + 'scaffold_autoscale_settings_parameters', cf_autoscale)
-    cli_generic_update_command(__name__, 'monitor autoscale-settings update',
+    _cli_generic_update_command(__name__, 'monitor autoscale-settings update',
                                autoscale_path + 'get', autoscale_path + 'create_or_update', cf_autoscale,
                                exception_handler=monitor_exception_handler)
 

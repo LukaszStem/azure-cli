@@ -8,7 +8,7 @@
 from azure.cli.core.commands import cli_command
 from azure.cli.core.util import empty_on_404
 from azure.cli.core.commands.arm import \
-    (cli_generic_wait_command, handle_long_running_operation_exception, deployment_validate_table_format)
+    (_cli_generic_wait_command, handle_long_running_operation_exception, deployment_validate_table_format)
 from azure.cli.core.profiles import supported_api_version, PROFILE_TYPE
 from ._client_factory import _acs_client_factory
 
@@ -18,7 +18,7 @@ if not supported_api_version(PROFILE_TYPE, max_api='2017-03-09-profile'):
 
     # Per conversation with ACS team, hide the update till we have something meaningful to tweak
     # from azure.cli.command_modules.acs.custom import update_acs
-    # cli_generic_update_command(__name__, 'acs update', ContainerServicesOperations.get, ContainerServicesOperations.create_or_update, cf_acs)
+    # _cli_generic_update_command(__name__, 'acs update', ContainerServicesOperations.get, ContainerServicesOperations.create_or_update, cf_acs)
 
     # custom commands
     cli_command(__name__, 'acs list-locations', 'azure.cli.command_modules.acs.custom#list_acs_locations')
@@ -29,7 +29,7 @@ if not supported_api_version(PROFILE_TYPE, max_api='2017-03-09-profile'):
     cli_command(__name__, 'acs dcos browse', 'azure.cli.command_modules.acs.custom#dcos_browse')
     cli_command(__name__, 'acs dcos install-cli', 'azure.cli.command_modules.acs.custom#dcos_install_cli')
     cli_command(__name__, 'acs create', 'azure.cli.command_modules.acs.custom#acs_create', no_wait_param='no_wait', exception_handler=handle_long_running_operation_exception, table_transformer=deployment_validate_table_format)
-    cli_generic_wait_command(__name__, 'acs wait', 'azure.mgmt.containerservice.operations.container_services_operations#ContainerServicesOperations.get', _acs_client_factory)
+    _cli_generic_wait_command(__name__, 'acs wait', 'azure.mgmt.containerservice.operations.container_services_operations#ContainerServicesOperations.get', _acs_client_factory)
     cli_command(__name__, 'acs kubernetes browse', 'azure.cli.command_modules.acs.custom#k8s_browse')
     cli_command(__name__, 'acs kubernetes install-cli', 'azure.cli.command_modules.acs.custom#k8s_install_cli')
     cli_command(__name__, 'acs kubernetes get-credentials', 'azure.cli.command_modules.acs.custom#k8s_get_credentials')

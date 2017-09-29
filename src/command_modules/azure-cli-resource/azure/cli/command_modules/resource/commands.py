@@ -82,13 +82,13 @@ def load_command_table(self, args):
 
     with self.command_group('group', resource_group_sdk) as g:
         g.command('delete', 'delete', no_wait_param='raw', confirmation=True)
-        # self.cli_generic_wait_command(__name__, 'group wait', 'azure.mgmt.resource.resources.operations.resource_groups_operations#ResourceGroupsOperations.get', cf_resource_groups)
         g.command('show', 'get', exception_handler=empty_on_404)
         g.command('exists', 'check_existence')
         g.command('list', 'list_resource_groups', resource_custom, table_transformer=transform_resource_group_list)
         g.command('create', 'create_resource_group', resource_custom)
         g.command('export', 'export_group_as_template', resource_custom)
-        g.generic_update_command('update')
+        g.generic_update_command('update', help='MYSTIC NOODLE!')
+        g.generic_wait_command('wait', help='MAGIC NOODLES~!')
 
     # Resource commands
 
@@ -110,7 +110,7 @@ def load_command_table(self, args):
         g.command('list', 'list_resources', table_transformer=transform_resource_list)
         g.command('tag', 'tag_resource')
         g.command('move', 'move_resource')
-        #self.cli_generic_update_command(__name__, 'resource update',
+        #self._cli_generic_update_command(__name__, 'resource update',
         #                                'azure.cli.command_modules.resource.custom#show_resource',
         #                                'azure.cli.command_modules.resource.custom#update_resource')
 
@@ -145,7 +145,7 @@ def load_command_table(self, args):
 
     with self.command_group('group deployment', resource_deployment_sdk) as g:
         g.command('create', 'deploy_arm_template', resource_custom, no_wait_param='no_wait', exception_handler=handle_long_running_operation_exception)
-        # self.cli_generic_wait_command(__name__, 'group deployment wait', 'azure.mgmt.resource.resources.operations.deployments_operations#DeploymentsOperations.get', cf_deployments)
+        # self._cli_generic_wait_command(__name__, 'group deployment wait', 'azure.mgmt.resource.resources.operations.deployments_operations#DeploymentsOperations.get', cf_deployments)
         if self.supported_api_version(min_api='2017-05-10'):
             g.command('list', 'list_by_resource_group', table_transformer=transform_deployments_list)
         else:

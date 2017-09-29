@@ -7,8 +7,7 @@ import argparse
 import re
 from six import string_types
 
-from azure.cli.core import AzCliCommand
-from azure.cli.core import CONFIRM_PARAM_NAME
+from azure.cli.core import AzCliCommand, CONFIRM_PARAM_NAME, AzCommandsLoader
 from azure.cli.core.commands.client_factory import get_mgmt_service_client
 from azure.cli.core.commands.validators import IterateValue
 from azure.cli.core.util import shell_safe_json_parse
@@ -311,29 +310,30 @@ def _get_child(parent, collection_name, item_name, collection_key):
     else:
         return result
 
-def cli_generic_update_command(context, module_name, name, getter_op, setter_op, factory=None,
-                               setter_arg_name='parameters', table_transformer=None,
-                               child_collection_prop_name=None, child_collection_key='name',
-                               child_arg_name='item_name', custom_function_op=None,
-                               no_wait_param=None, transform=None, confirmation=None,
-                               exception_handler=None, formatter_class=None):
+def _cli_generic_update_command(context, module_name, name, getter_op, setter_op,
+                                getter_factory=None, setter_factory=None, setter_arg_name='parameters',
+                                child_collection_prop_name=None, child_collection_key='name',
+                                child_arg_name='item_name',
+                                custom_function_op=None, custom_function_factory=None,
+                                **kwargs):
+    if not isinstance(context, AzCommandsLoader):
+        raise TypeError("'context' expected type '{}'. Got: '{}'".format(AzCommandsLoader.__name__, type(context)))
     if not isinstance(getter_op, string_types):
-        raise ValueError("Getter operation must be a string. Got '{}'".format(getter_op))
+        raise TypeError("Getter operation must be a string. Got '{}'".format(getter_op))
     if not isinstance(setter_op, string_types):
-        raise ValueError("Setter operation must be a string. Got '{}'".format(setter_op))
+        raise TypeError("Setter operation must be a string. Got '{}'".format(setter_op))
     if custom_function_op and not isinstance(custom_function_op, string_types):
-        raise ValueError("Custom function operation must be a string. Got '{}'".format(
+        raise TypeError("Custom function operation must be a string. Got '{}'".format(
             custom_function_op))
 
     def get_arguments_loader():
-        return dict(extract_args_from_signature(context.get_op_handler(getter_op)))
+        return dict(extract_args_from_signature(context._get_op_handler(getter_op)))
 
     def set_arguments_loader():
-        return dict(extract_args_from_signature(context.get_op_handler(setter_op),
-                                                no_wait_param=no_wait_param))
+        return dict(extract_args_from_signature(context._get_op_handler(setter_op)))
 
     def function_arguments_loader():
-        return dict(extract_args_from_signature(context.get_op_handler(custom_function_op))) \
+        return dict(extract_args_from_signature(context._get_op_handler(custom_function_op))) \
             if custom_function_op else {}
 
     def arguments_loader():
@@ -370,7 +370,7 @@ def cli_generic_update_command(context, module_name, name, getter_op, setter_op,
             client = factory(context.cli_ctx, None) if factory else None
 
         getterargs = {key: val for key, val in args.items() if key in get_arguments_loader()}
-        getter = context.get_op_handler(getter_op)
+        getter = context._get_op_handler(getter_op)
         try:
             if child_collection_prop_name:
                 parent = getter(client=client, **getterargs) if client else getter(**getterargs)
@@ -386,7 +386,7 @@ def cli_generic_update_command(context, module_name, name, getter_op, setter_op,
 
             # pass instance to the custom_function, if provided
             if custom_function_op:
-                custom_function = context.get_op_handler(custom_function_op)
+                custom_function = context._get_op_handler(custom_function_op)
                 custom_func_args = \
                     {k: v for k, v in args.items() if k in function_arguments_loader()}
                 if child_collection_prop_name:
@@ -418,7 +418,7 @@ def cli_generic_update_command(context, module_name, name, getter_op, setter_op,
 
             # Done... update the instance!
             setterargs[setter_arg_name] = parent if child_collection_prop_name else instance
-            setter = context.get_op_handler(setter_op)
+            setter = context._get_op_handler(setter_op)
 
             opres = setter(client, **setterargs) if client else setter(**setterargs)
 
@@ -452,8 +452,8 @@ def cli_generic_update_command(context, module_name, name, getter_op, setter_op,
                 setattr(namespace, 'ordered_arguments', [])
             namespace.ordered_arguments.append((option_string, values))
 
-    cmd = AzCliCommand(context.cli_ctx, name, handler, table_transformer=table_transformer,
-                       arguments_loader=arguments_loader, formatter_class=formatter_class)
+    context._cli_command(name, handler=handler, **kwargs)
+    cmd = context.command_table[name]
     group_name = 'Generic Update'
     cmd.add_argument('properties_to_set', '--set', nargs='+', action=OrderedArgsAction, default=[],
                      help='Update an object by specifying a property path and value to set.'
@@ -471,13 +471,13 @@ def cli_generic_update_command(context, module_name, name, getter_op, setter_op,
     context._command_module_map[name] = module_name
 
 
-def cli_generic_wait_command(context, module_name, name, getter_op, factory=None, exception_handler=None):
+def _cli_generic_wait_command(context, module_name, name, getter_op, **kwargs):
 
     if not isinstance(getter_op, string_types):
         raise ValueError("Getter operation must be a string. Got '{}'".format(type(getter_op)))
 
     def get_arguments_loader():
-        return dict(extract_args_from_signature(context.get_op_handler(getter_op)))
+        return dict(extract_args_from_signature(context._get_op_handler(getter_op)))
 
     def arguments_loader():
         arguments = {}
@@ -510,7 +510,7 @@ def cli_generic_wait_command(context, module_name, name, getter_op, factory=None
         getterargs = {key: val for key, val in args.items()
                       if key in get_arguments_loader()}
 
-        getter = context.get_op_handler(getter_op)
+        getter = context._get_op_handler(getter_op)
 
         timeout = args.pop('timeout')
         interval = args.pop('interval')
@@ -553,7 +553,8 @@ def cli_generic_wait_command(context, module_name, name, getter_op, factory=None
 
         return CLIError('Wait operation timed-out after {} seconds'.format(timeout))
 
-    cmd = AzCliCommand(context.cli_ctx, name, handler, arguments_loader=arguments_loader)
+    context._cli_command(name, handler=handler, **kwargs)
+    cmd = context.command_table[name]
     group_name = 'Wait Condition'
     cmd.add_argument('timeout', '--timeout', default=3600, arg_group=group_name, type=int,
                      help='maximum wait in seconds')

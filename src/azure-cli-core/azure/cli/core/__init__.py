@@ -254,11 +254,11 @@ class MainCommandsLoader(CLICommandsLoader):
 
 class AzCommandsLoader(CLICommandsLoader):
 
-    def __init__(self, cli_ctx=None, default_resource_type=None):
+    def __init__(self, cli_ctx=None, resource_type=None):
         from azure.cli.core.profiles import PROFILE_TYPE
         super(AzCommandsLoader, self).__init__(cli_ctx=cli_ctx, command_cls=AzCliCommand)
         self.module_name = __name__
-        self.default_resource_type = default_resource_type or PROFILE_TYPE
+        self.resource_type = resource_type or PROFILE_TYPE
         self.max_api = 'latest'
         self.min_api = None
         self._command_module_map = {}
@@ -276,22 +276,24 @@ class AzCommandsLoader(CLICommandsLoader):
         from azure.cli.core.profiles import supported_api_version
         return supported_api_version(
             cli_ctx=self.cli_ctx,
-            resource_type=resource_type or self.default_resource_type,
+            resource_type=resource_type or self.resource_type,
             min_api=min_api or self.min_api,
             max_api=max_api or self.max_api)
 
     def command_group(self, group_name, command_type=None, **kwargs):
         from azure.cli.core.sdk.util import _CommandGroup
-        return _CommandGroup(self.module_name, self, group_name, command_type, **kwargs)
+        merged_kwargs = command_type.settings.copy()
+        merged_kwargs.update(kwargs)
+        return _CommandGroup(self.module_name, self, group_name, command_type, **merged_kwargs)
 
     def argument_context(self, scope, **kwargs):
         from azure.cli.core.sdk.util import _ParametersContext
         return _ParametersContext(self, scope, **kwargs)
 
-    def _cli_command(self, name, operation, **kwargs):
+    def _cli_command(self, name, operation=None, handler=None, **kwargs):
         from azure.cli.core.extension import EXTENSIONS_MOD_PREFIX
 
-        self.command_table[name] = self.create_command(self.module_name, name, operation, **kwargs)
+        self.command_table[name] = self._create_command(self.module_name, name, operation=operation, handler=handler, **kwargs)
 
         # Set the command source as we have the current command table and are about to add the command
         if self.module_name and self.module_name.startswith(EXTENSIONS_MOD_PREFIX):
@@ -304,10 +306,14 @@ class AzCommandsLoader(CLICommandsLoader):
         else:
             self.command_table[name].command_source = None
 
-    def create_command(self, module_name, name, operation, **kwargs):  # pylint: disable=unused-argument
+    def _create_command(self, module_name, name, operation=None, handler=None, **kwargs):  # pylint: disable=unused-argument
 
-        if not isinstance(operation, six.string_types):
-            raise ValueError("Operation must be a string. Got '{}'".format(operation))
+        if operation and not isinstance(operation, six.string_types):
+            raise TypeError("Operation must be a string. Got '{}'".format(operation))
+        if handler and not callable(handler):
+            raise TypeError("Handler must be a callable. Got '{}'".format(operation))
+        if bool(operation) == bool(handler):
+            raise TypeError("Must specify exactly one of either 'operation' or 'handler'")
 
         name = ' '.join(name.split())
 
@@ -325,13 +331,14 @@ class AzCommandsLoader(CLICommandsLoader):
 
                 self.cli_ctx.raise_event(EVENT_COMMAND_CANCELLED, command=name, command_args=command_args)
                 raise CLIError('Operation cancelled.')
-            op = self.get_op_handler(operation)
+            op = self._get_op_handler(operation)
             client = client_factory(self.cli_ctx, command_args) if client_factory else None
             result = op(client, **command_args) if client else op(**command_args)
             return result
 
         def arguments_loader():
-            cmd_args = list(extract_args_from_signature(self.get_op_handler(operation)))
+            op_handler = handler or self._get_op_handler(operation)
+            cmd_args = list(extract_args_from_signature(op_handler))
             # this was previously stored in "extract_args_from_signature" but that no longer works so it is being
             # relocated here.
             if no_wait_param:
@@ -346,15 +353,15 @@ class AzCommandsLoader(CLICommandsLoader):
 
 
         def description_loader():
-            return extract_full_summary_from_signature(self.get_op_handler(operation))
+            op_handler = handler or self._get_op_handler(operation)
+            return extract_full_summary_from_signature(op_handler)
 
         kwargs['arguments_loader'] = arguments_loader
         kwargs['description_loader'] = description_loader
 
-        return self.command_cls(self.cli_ctx, name, _command_handler, **kwargs)
+        return self.command_cls(self.cli_ctx, name, handler or _command_handler, **kwargs)
 
-
-    def get_op_handler(self, operation):
+    def _get_op_handler(self, operation):
         """ Import and load the operation handler """
         # Patch the unversioned sdk path to include the appropriate API version for the
         # resource type in question.

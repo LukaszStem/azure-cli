@@ -3,6 +3,7 @@
 # Licensed under the MIT License. See License.txt in the project root for license information.
 # --------------------------------------------------------------------------------------------
 
+from azure.cli.core.commands.arm import _cli_generic_update_command, _cli_generic_wait_command
 from azure.cli.core.profiles import ResourceType
 from azure.cli.core.profiles._shared import get_versioned_sdk_path
 
@@ -62,13 +63,15 @@ class _CommandGroup(KnackCommandGroup):
         :param command_type: CliCommandType object containing settings to apply to the entire command group
         :type command_type: CliCommandType
         :param kwargs: Keyword arguments. Supported keyword arguments include:
+            - client_factory: Callable which returns a client needed to access the underlying command method. (function)
             - confirmation: Prompt prior to the action being executed. This is useful if the action
                             would cause a loss of data. (bool)
+            - exception_handler: Exception handler for handling non-standard exceptions (function)
+            - no_wait_param: The name of a boolean parameter that will be exposed as `--no-wait` to skip long running operation polling. (string)
             - transform: Transform function for transforming the output of the command (function)
             - table_transformer: Transform function or JMESPath query to be applied to table output to create a
                                  better output format for tables. (function or string)
-            - exception_handler: Exception handler for handling non-standard exceptions (function)
-            - resource_type: The ResourceType enum value to use with min or max API.
+            - resource_type: The ResourceType enum value to use with min or max API. (ResourceType)
             - min_api: Minimum API version required for commands within the group (string)
             - max_api: Maximum API version required for commands within the group (string)
         :rtype: None
@@ -88,7 +91,7 @@ class _CommandGroup(KnackCommandGroup):
         merged_kwargs = merged_command_type.settings.copy()
         merged_kwargs.update(kwargs)
         self.command_loader._cli_command(command_name,
-                                         operations_tmpl.format(method_name), **merged_kwargs)
+                                         operation=operations_tmpl.format(method_name), **merged_kwargs)
 
 
     def generic_update_command(self, name,
@@ -97,24 +100,53 @@ class _CommandGroup(KnackCommandGroup):
                                custom_func_name=None, custom_func_type=None,
                                child_collection_prop_name=None, child_collection_key='name', child_arg_name='item_name',
                                **kwargs):
+        for item in [getter_type, setter_type, custom_func_type]:
+            if item and not isinstance(item, CliCommandType):
+                raise TypeError("*_type expected type '{}'. Got: '{}'".format(CliCommandType.__name__, type(item)))
         if bool(custom_func_name) != bool(custom_func_type):
             raise CLIError('Command authoring error: to enable custom arguments, both `custom_func_name` and '
                             '`custom_func_type` must be provided.')
-        elif custom_func_name:
-            # TODO: Make this work
-            custom_function_op = None
 
-        self.command_loader.cli_generic_update_command(
+        getter_tmpl = getter_type.settings['operations_tmpl'] if getter_type else self.group_command_type.settings['operations_tmpl']
+        getter_factory = getter_type.settings['client_factory'] if getter_type else self.group_command_type.settings['client_factory']
+        setter_tmpl = setter_type.settings['operations_tmpl'] if setter_type else self.group_command_type.settings['operations_tmpl']
+        setter_factory = setter_type.settings['client_factory'] if setter_type else self.group_command_type.settings['client_factory']
+        custom_tmpl = None
+        custom_factory = None
+        if custom_func_name:
+            custom_tmpl = custom_func_type.settings['operations_tmpl']
+            custom_factory = custom_func_type.settings['client_factory']
+
+        _cli_generic_update_command(
+            self.command_loader,
             self.module_name,
             '{} {}'.format(self.group_name, name),
-            self.operations_tmpl.format(getter_name),
-            self.operations_tmpl.format(setter_name),
-            factory=self._client_factory,
-            custom_function_op=custom_function_op,
-            setter_arg_name=setter_arg_name)
+            getter_op=getter_tmpl.format(getter_name),
+            getter_factory=getter_factory,
+            setter_op=setter_tmpl.format(setter_name),
+            setter_factory=setter_factory,
+            setter_arg_name=setter_arg_name,
+            custom_function_op=custom_tmpl.format(custom_func_name) if custom_func_type else None,
+            custom_function_factory=custom_factory,
+            child_collection_prop_name=child_collection_prop_name,
+            child_collection_key=child_collection_key,
+            child_arg_name=child_arg_name,
+            **kwargs)
 
-    def generic_wait_command(self, name, getter_name, command_type=None, **kwargs):
-        pass
+    def generic_wait_command(self, name, getter_name='get', command_type=None, **kwargs):
+        if command_type and not isinstance(command_type, CliCommandType):
+            raise TypeError("command_type expected type '{}'. Got: '{}'".format(CliCommandType.__name__, type(item)))
+
+        getter_tmpl = command_type.settings['operations_tmpl'] if command_type else self.group_command_type.settings['operations_tmpl']
+        getter_factory = command_type.settings['client_factory'] if command_type else self.group_command_type.settings['client_factory']
+
+        _cli_generic_wait_command(
+            self.command_loader,
+            self.module_name,
+            '{} {}'.format(self.group_name, name),
+            getter_op=getter_tmpl.format(getter_name),
+            client_factory=getter_factory,
+            **kwargs)
 
 
 # PARAMETERS UTILITIES

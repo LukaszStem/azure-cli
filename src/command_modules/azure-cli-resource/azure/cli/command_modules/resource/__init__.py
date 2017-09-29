@@ -14,7 +14,7 @@ class ResourceCommandsLoader(AzCommandsLoader):
     def __init__(self, cli_ctx=None):
         super(ResourceCommandsLoader, self).__init__(cli_ctx=cli_ctx)
         self.module_name = __name__
-        self.default_resource_type = ResourceType.MGMT_RESOURCE_RESOURCES
+        self.resource_type = ResourceType.MGMT_RESOURCE_RESOURCES
 
 
     def load_command_table(self, args):
