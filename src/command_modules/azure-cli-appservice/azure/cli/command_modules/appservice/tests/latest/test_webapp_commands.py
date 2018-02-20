@@ -793,7 +793,7 @@ class WebappAuthenticationTest(ScenarioTest):
                               JMESPathCheck('tokenRefreshExtensionHours', 7.2),
                               JMESPathCheck('clientId', 'aad_client_id'),
                               JMESPathCheck('clientSecret', 'aad_secret'),
-                              JMESPathCheck('issuer', 'issue_url'),
+                              JMESPathCheck('issuer', 'issuer_url'),
                               JMESPathCheck('facebookAppId', 'facebook_id'),
                               JMESPathCheck('facebookAppSecret', 'facebook_secret')]).get_output_in_json()
 
