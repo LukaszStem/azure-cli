@@ -73,7 +73,7 @@ def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_fi
             site_config.linux_fx_version = runtime
             match = helper.resolve(runtime)
             if not match:
-                raise CLIError("Linux Runtime '{}' is not supported." \
+                raise CLIError("Linux Runtime '{}' is not supported."
                                "Please invoke 'list-runtimes' to cross check".format(runtime))
 
         elif deployment_container_image_name:
@@ -878,7 +878,6 @@ def update_backup_schedule(cmd, resource_group_name, webapp_name, storage_accoun
                            frequency=None, keep_at_least_one_backup=None,
                            retention_period_in_days=None, db_name=None,
                            db_connection_string=None, db_type=None, backup_name=None, slot=None):
-    client = web_client_factory(cmd.cli_ctx)
     configuration = None
     if backup_name and backup_name.lower().endswith('.zip'):
         backup_name = backup_name[:-4]
@@ -1502,8 +1501,8 @@ class _StackRuntimeHelper(object):
     def _load_stacks(self):
         if self._stacks:
             return
-        raw_stacks = self._client.provider.get_available_stacks(os_type_selected=('Linux' if self._linux else
-                           'Windows'),raw=True)
+        os_type = ('Linux' if self._linux else 'Windows')
+        raw_stacks = self._client.provider.get_available_stacks(os_type_selected=os_type, raw=True)
         bytes_value = raw_stacks._get_next().content
         json_value = bytes_value.decode('utf8')
 
@@ -1518,17 +1517,16 @@ class _StackRuntimeHelper(object):
                                          None)
                     result.append({
                         'displayName': (default_minor['runtimeVersion']
-                                                    if default_minor else major['runtimeVersion'])
+                                        if default_minor else major['runtimeVersion'])
                     })
-        else: #Windows stacks
+        else:  # Windows stacks
             config_mappings = {
                 'node': 'WEBSITE_NODE_DEFAULT_VERSION',
                 'python': 'python_version',
                 'php': 'php_version',
                 'aspnet': 'net_framework_version'
             }
-            
-            
+
             # get all stack version except 'java'
             for stack in stacks:
                 if stack['name'] not in config_mappings:
@@ -1544,7 +1542,7 @@ class _StackRuntimeHelper(object):
                                                     if default_minor else major['runtimeVersion'])
                         }
                     })
-            
+
             # deal with java, which pairs with java container version
             java_stack = next((s for s in stacks if s['name'] == 'java'))
             java_container_stack = next((s for s in stacks if s['name'] == 'javaContainers'))
@@ -1561,7 +1559,7 @@ class _StackRuntimeHelper(object):
                                 'java_container_version': fx_version['runtimeVersion']
                             }
                         })
-            
+
             for r in result:
                 r['setter'] = (_StackRuntimeHelper.update_site_appsettings if 'node' in
                                r['displayName'] else _StackRuntimeHelper.update_site_config)
