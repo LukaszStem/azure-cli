@@ -73,7 +73,8 @@ def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_fi
             site_config.linux_fx_version = runtime
             match = helper.resolve(runtime)
             if not match:
-                raise CLIError("Linux Runtime '{}' is not supported. Please invoke 'list-runtimes' to cross check".format(runtime))  # pylint: disable=line-too-long
+                raise CLIError("Linux Runtime '{}' is not supported." \
+                               "Please invoke 'list-runtimes' to cross check".format(runtime))
 
         elif deployment_container_image_name:
             site_config.linux_fx_version = _format_linux_fx_version(deployment_container_image_name)
@@ -1503,14 +1504,15 @@ class _StackRuntimeHelper(object):
             return
         raw_stacks = self._client.provider.get_available_stacks(os_type_selected=('Linux' if self._linux else
                            'Windows'),raw=True)
-        import json
         bytes_value = raw_stacks._get_next().content
         json_value = bytes_value.decode('utf8')
+
+        import json
         json_stacks = json.loads(json_value)
         stacks = json_stacks['value']
         result = []
         if self._linux:
-            for name, properties in [(s['name'], s['properties']) for s in stacks]:
+            for properties in [(s['properties']) for s in stacks]:
                 for major in properties['majorVersions']:
                     default_minor = next((m for m in (major['minorVersions'] or []) if m['isDefault']),
                                          None)
@@ -1528,8 +1530,10 @@ class _StackRuntimeHelper(object):
             
             
             # get all stack version except 'java'
-            for name, properties in [(s['name'], s['properties']) for s in stacks
-                                     if s['name'] in config_mappings]:
+            for stack in stacks:
+                if stack['name'] not in config_mappings:
+                    continue
+                name, properties = stack['name'], stack['properties']
                 for major in properties['majorVersions']:
                     default_minor = next((m for m in (major['minorVersions'] or []) if m['isDefault']),
                                          None)
