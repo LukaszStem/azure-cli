@@ -1023,8 +1023,7 @@ def set_deployment_user(cmd, user_name, password=None):
     Update deployment credentials.(Note, all webapps in your subscription will be impacted)
     '''
     client = web_client_factory(cmd.cli_ctx)
-    user = User()
-    user.publishing_user_name = user_name
+    user = User(user_name)
     if password is None:
         try:
             password = prompt_pass(msg='Password: ', confirm=True)
