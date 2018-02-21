@@ -12,6 +12,7 @@ except ImportError:
 from binascii import hexlify
 from os import urandom
 import OpenSSL.crypto
+import json
 
 from knack.prompting import prompt_pass, NoTTYException
 from knack.util import CLIError
@@ -1504,8 +1505,6 @@ class _StackRuntimeHelper(object):
         raw_stacks = self._client.provider.get_available_stacks(os_type_selected=os_type, raw=True)
         bytes_value = raw_stacks._get_next().content
         json_value = bytes_value.decode('utf8')
-
-        import json
         json_stacks = json.loads(json_value)
         stacks = json_stacks['value']
         result = []
