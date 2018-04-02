@@ -161,7 +161,7 @@ class WebappQuickCreateTest(ScenarioTest):
 
 
 # Test Framework is not able to handle binary file format, hence, only run live
-class AppServiceLogTest(LiveScenarioTest):
+class AppServiceLogTest(ScenarioTest):
     @ResourceGroupPreparer()
     def test_download_win_web_log(self, resource_group):
         import zipfile
@@ -375,7 +375,7 @@ class LinuxWebappSceanrioTest(ScenarioTest):
 
     @ResourceGroupPreparer(location='japanwest')
     def test_linux_webapp(self, resource_group):
-        runtime = 'node|6.4'
+        runtime = 'node|6.6'
         plan = self.create_random_name(prefix='webapp-linux-plan', length=24)
         webapp = self.create_random_name(prefix='webapp-linux', length=24)
         self.cmd('appservice plan create -g {} -n {} --sku S1 --is-linux' .format(resource_group, plan), checks=[
@@ -425,7 +425,7 @@ class WebappACRSceanrioTest(ScenarioTest):
     def test_acr_integration(self, resource_group):
         plan = self.create_random_name(prefix='acrtestplan', length=24)
         webapp = self.create_random_name(prefix='webappacrtest', length=24)
-        runtime = 'node|6.4'
+        runtime = 'node|6.6'
         acr_registry_name = webapp
         self.cmd('acr create --admin-enabled -g {} -n {} --sku Basic'.format(resource_group, acr_registry_name))
         self.cmd('appservice plan create -g {} -n {} --sku S1 --is-linux' .format(resource_group, plan))
@@ -574,12 +574,12 @@ class WebappSSLCertTest(ScenarioTest):
     @ResourceGroupPreparer()
     def test_webapp_ssl(self, resource_group, resource_group_location):
         plan = self.create_random_name(prefix='ssl-test-plan', length=24)
-        webapp_name = 'webapp-ssl-test123'
+        webapp_name = self.create_random_name(prefix='web-ssl-test', length=20)
         # Cert Generated using
         # https://docs.microsoft.com/en-us/azure/app-service-web/web-sites-configure-ssl-certificate#bkmk_ssopenssl
         pfx_file = os.path.join(TEST_DIR, 'server.pfx')
         cert_password = 'test'
-        cert_thumbprint = 'DB2BA6898D0B330A93E7F69FF505C61EF39921B6'
+        cert_thumbprint = '9E9735C45C792B03B3FFCCA614852B32EE71AD6B'
         self.cmd('appservice plan create -g {} -n {} --sku B1'.format(resource_group, plan))
         self.cmd('webapp create -g {} -n {} --plan {}'.format(resource_group, webapp_name, plan, resource_group_location))
         self.cmd('webapp config ssl upload -g {} -n {} --certificate-file "{}" --certificate-password {}'.format(resource_group, webapp_name, pfx_file, cert_password), checks=[
@@ -604,9 +604,9 @@ class WebappBackupConfigScenarioTest(ScenarioTest):
         plan_result = self.cmd('appservice plan create -g {} -n {} --sku S1'.format(resource_group, plan)).get_output_in_json()
         self.cmd('webapp create -g {} -n {} --plan {}'.format(resource_group, webapp_name, plan_result['appServicePlanName']))
 
-        sas_url = 'https://azureclistore.blob.core.windows.net/sitebackups?st=2018-02-02T09%3A12%3A00Z&se=2018-02-02T18%3A00%3A00Z&sp=rwdl&sv=2017-04-17&sr=c&sig=HMOnvE2bcr7IEMtgZ%2FaBMHUs9VwhO3sp2mDef%2B2gIYc%3D'
+        sas_url = 'https://azureclistore.blob.core.windows.net/sitebackups?st=2018-02-19T19%3A04%3A00Z&se=2018-02-20T19%3A04%3A00Z&sp=rwdl&sv=2017-04-17&sr=c&sig=ItyZeVRgwwj%2FweObpgER20z9nZ1RoKvDUvcA2lpQm7k%3D'
         frequency = '1d'
-        db_conn_str = 'Server=tcp:cli-backup.database.windows.net,1433;Initial Catalog=cli-backup;Persist Security Info=False;User ID=cliuser;Password=cli!password12;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+        db_conn_str = 'Server=tcp:cli-backup.database.windows.net,1433;Initial Catalog=cli-backup;Persist Security Info=False;User ID=cliuser;Password=password123!;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
         retention_period = 5
 
         # set without databases
@@ -661,8 +661,8 @@ class WebappBackupConfigScenarioTest(ScenarioTest):
         plan = self.create_random_name(prefix='webapp-backup-plan', length=24)
         plan_result = self.cmd('appservice plan create -g {} -n {} --sku S1'.format(resource_group, plan)).get_output_in_json()
         self.cmd('webapp create -g {} -n {} --plan {}'.format(resource_group, webapp_name, plan_result['appServicePlanName']))
-        sas_url = 'https://azureclistore.blob.core.windows.net/sitebackups?st=2018-02-02T09%3A12%3A00Z&se=2018-02-02T18%3A00%3A00Z&sp=rwdl&sv=2017-04-17&sr=c&sig=HMOnvE2bcr7IEMtgZ%2FaBMHUs9VwhO3sp2mDef%2B2gIYc%3D'
-        db_conn_str = 'Server=tcp:cli-backup.database.windows.net,1433;Initial Catalog=cli-backup;Persist Security Info=False;User ID=cliuser;Password=cli!password12;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+        sas_url = 'https://azureclistore.blob.core.windows.net/sitebackups?st=2018-02-19T19%3A04%3A00Z&se=2018-02-20T19%3A04%3A00Z&sp=rwdl&sv=2017-04-17&sr=c&sig=ItyZeVRgwwj%2FweObpgER20z9nZ1RoKvDUvcA2lpQm7k%3D'
+        db_conn_str = 'Server=tcp:cli-backup.database.windows.net,1433;Initial Catalog=cli-backup;Persist Security Info=False;User ID=cliuser;Password=password123!;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
 
         database_name = 'cli-backup'
         database_type = 'SqlAzure'
@@ -744,11 +744,11 @@ class FunctionAppOnLinux(ScenarioTest):
         self.cmd('functionapp create -g {} -n {} --plan {} -s {}'.format(resource_group, functionapp, plan, storage_account), checks=[
             JMESPathCheck('name', functionapp)
         ])
-        self.cmd('functionapp list -g {}'.format(resource_group), checks=[
+        result = self.cmd('functionapp list -g {}'.format(resource_group), checks=[
             JMESPathCheck('length([])', 1),
-            JMESPathCheck('[0].name', functionapp),
-            JMESPathCheck('[0].kind', 'functionapp,linux')
-        ])
+            JMESPathCheck('[0].name', functionapp)
+        ]).get_output_in_json()
+        self.assertTrue('functionapp,linux' in result[0]['kind'])
         self.cmd('functionapp delete -g {} -n {}'.format(resource_group, functionapp))
 
 
@@ -781,7 +781,7 @@ class WebappAuthenticationTest(ScenarioTest):
         result = self.cmd('webapp auth update -g {} -n {} --enabled true --action LoginWithFacebook '
                           '--token-store false --runtime-version v5.0 --token-refresh-extension-hours 7.2 '
                           '--aad-client-id aad_client_id --aad-client-secret aad_secret '
-                          '--aad-allowed-token-audiences audience1 --aad-token-issuer-url issuer_url '
+                          '--aad-allowed-token-audiences https://audience1 --aad-token-issuer-url https://issuer_url '
                           '--facebook-app-id facebook_id --facebook-app-secret facebook_secret '
                           '--facebook-oauth-scopes public_profile email'
                           .format(resource_group, webapp_name)).assert_with_checks([
@@ -793,11 +793,11 @@ class WebappAuthenticationTest(ScenarioTest):
                               JMESPathCheck('tokenRefreshExtensionHours', 7.2),
                               JMESPathCheck('clientId', 'aad_client_id'),
                               JMESPathCheck('clientSecret', 'aad_secret'),
-                              JMESPathCheck('issuer', 'issuer_url'),
+                              JMESPathCheck('issuer', 'https://issuer_url'),
                               JMESPathCheck('facebookAppId', 'facebook_id'),
                               JMESPathCheck('facebookAppSecret', 'facebook_secret')]).get_output_in_json()
 
-        self.assertIn('audience1', result['allowedAudiences'])
+        self.assertIn('https://audience1', result['allowedAudiences'])
         self.assertIn('email', result['facebookOauthScopes'])
         self.assertIn('public_profile', result['facebookOauthScopes'])
 
@@ -819,7 +819,7 @@ class WebappUpdateTest(ScenarioTest):
                      JMESPathCheck('clientAffinityEnabled', False)])
 
 
-class WebappZipDeployScenarioTest(LiveScenarioTest):
+class WebappZipDeployScenarioTest(ScenarioTest):
     @ResourceGroupPreparer(name_prefix='cli_test_webapp_zipDeploy')
     def test_deploy_zip(self, resource_group):
         webapp_name = self.create_random_name('webapp-zipDeploy-test', 40)
@@ -829,26 +829,30 @@ class WebappZipDeployScenarioTest(LiveScenarioTest):
         self.cmd('webapp create -g {} -n {} --plan {}'.format(resource_group, webapp_name, plan_name))
         self.cmd('webapp deployment source config-zip -g {} -n {} --src "{}"'.format(resource_group, webapp_name, zip_file)).assert_with_checks([
             JMESPathCheck('status', 4),
-            JMESPathCheck('deployer', 'Zip-Push'),
-            JMESPathCheck('message', 'Created via zip push deployment'),
-            JMESPathCheck('complete', True)])
+            JMESPathCheck('deployer', 'Push-Deployer'),
+            JMESPathCheck('message', 'Created via a push deployment'),
+            JMESPathCheck('complete', True)
+        ])
 
 
 class WebappImplictIdentityTest(ScenarioTest):
     @ResourceGroupPreparer()
-    def test_assign_identity(self, resource_group):
+    def test_webapp_assign_system_identity(self, resource_group):
         scope = '/subscriptions/{}/resourcegroups/{}'.format(self.get_subscription_id(), resource_group)
         role = 'Reader'
         plan_name = self.create_random_name('web-msi-plan', 20)
         webapp_name = self.create_random_name('web-msi', 20)
         self.cmd('appservice plan create -g {} -n {}'.format(resource_group, plan_name))
         self.cmd('webapp create -g {} -n {} --plan {}'.format(resource_group, webapp_name, plan_name))
-        guids = [uuid.UUID('88DAAF5A-EA86-4A68-9D45-477538D46667')]
+        guids = [uuid.UUID('88DAAF5A-EA86-4A68-9D45-477538D46668')]
         with mock.patch('azure.cli.core.commands.arm._gen_guid', side_effect=guids, autospec=True):
-            result = self.cmd('webapp assign-identity -g {} -n {} --role {} --scope {}'.format(resource_group, webapp_name, role, scope)).get_output_in_json()
+            result = self.cmd('webapp identity assign -g {} -n {} --role {} --scope {}'.format(resource_group, webapp_name, role, scope)).get_output_in_json()
+            self.cmd('webapp identity show -g {} -n {}'.format(resource_group, webapp_name), checks=[
+                self.check('principalId', result['principalId'])
+            ])
         self.cmd('role assignment list -g {} --assignee {}'.format(resource_group, result['principalId']), checks=[
             JMESPathCheck('length([])', 1),
-            JMESPathCheck('[0].properties.roleDefinitionName', role)
+            JMESPathCheck('[0].roleDefinitionName', role)
         ])
 
 
