@@ -32,7 +32,7 @@ from azure.cli.core.commands.client_factory import get_mgmt_service_client
 from azure.cli.core.commands import LongRunningOperation
 
 from .vsts_cd_provider import VstsContinuousDeliveryProvider
-from ._params import AUTH_TYPES
+from ._params import AUTH_TYPES, MULTI_CONTAINER_TYPES
 from ._client_factory import web_client_factory, ex_handler_factory
 from ._appservice_utils import _generic_site_operation
 
@@ -47,7 +47,7 @@ logger = get_logger(__name__)
 
 def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_file=None,
                   deployment_container_image_name=None, deployment_source_url=None, deployment_source_branch='master',
-                  deployment_local_git=None):
+                  deployment_local_git=None, multicontainer_config_type=None, multicontainer_config_file=None):
     if deployment_source_url and deployment_local_git:
         raise CLIError('usage error: --deployment-source-url <url> | --deployment-local-git')
     client = web_client_factory(cmd.cli_ctx)
@@ -66,8 +66,10 @@ def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_fi
     helper = _StackRuntimeHelper(client, linux=is_linux)
 
     if is_linux:
-        if runtime and deployment_container_image_name:
-            raise CLIError('usage error: --runtime | --deployment-container-image-name')
+        if not validate_linux_create_options(runtime, deployment_container_image_name,
+                                             multicontainer_config_type, multicontainer_config_file):
+            raise CLIError("usage error: --runtime | --deployment-container-image-name |"
+                           " --multicontainer-config-type with --multicontainer-config-file")
         if startup_file:
             site_config.app_command_line = startup_file
 
@@ -77,16 +79,18 @@ def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_fi
             if not match:
                 raise CLIError("Linux Runtime '{}' is not supported."
                                "Please invoke 'list-runtimes' to cross check".format(runtime))
-
         elif deployment_container_image_name:
             site_config.linux_fx_version = _format_linux_fx_version(deployment_container_image_name)
             site_config.app_settings.append(NameValuePair("WEBSITES_ENABLE_APP_SERVICE_STORAGE", "false"))
-        else:  # must specify runtime
-            raise CLIError('usage error: must specify --runtime | --deployment-container-image-name')  # pylint: disable=line-too-long
+        elif multicontainer_config_type and multicontainer_config_file:
+            encoded_config_file = _get_linux_multicontainer_config_file(cmd, resource_group_name,
+                                                                        name, multicontainer_config_file)
+            site_config.linux_fx_version = _format_linux_fx_version(encoded_config_file, multicontainer_config_type)
 
     elif runtime:  # windows webapp with runtime specified
         if startup_file or deployment_container_image_name:
-            raise CLIError("usage error: --startup-file or --deployment-container-image-name is "
+            raise CLIError("usage error: --startup-file or --deployment-container-image-name or "
+                           "--multicontainer-config-type with --multicontainer-config-file is "
                            "only appliable on linux webapp")
         match = helper.resolve(runtime)
         if not match:
@@ -115,6 +119,14 @@ def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_fi
     _fill_ftp_publishing_url(cmd, webapp, resource_group_name, name)
 
     return webapp
+
+
+def validate_linux_create_options(runtime=None, deployment_container_image_name=None,
+                                  multicontainer_config_type=None, multicontainer_config_file=None):
+    if bool(multicontainer_config_type) != bool(multicontainer_config_file):
+        return False
+    opts = [bool(runtime), bool(deployment_container_image_name), bool(multicontainer_config_type)]
+    return len([x for x in opts if x]) == 1  # you can only specify one out the combinations
 
 
 def update_app_settings(cmd, resource_group_name, name, settings=None, slot=None, slot_settings=None):
@@ -378,12 +390,14 @@ def _fill_ftp_publishing_url(cmd, webapp, resource_group_name, name, slot=None):
     return webapp
 
 
-def _format_linux_fx_version(custom_image_name):
+def _format_linux_fx_version(custom_image_name, custom_prefix=None):
     fx_version = custom_image_name.strip()
     fx_version_lower = fx_version.lower()
     # handles case of only spaces
     if fx_version:
-        if not fx_version_lower.startswith('docker|'):
+        if custom_prefix:
+            fx_version = '{}|{}'.format(custom_prefix, custom_image_name)
+        elif not fx_version_lower.startswith('docker|'):
             fx_version = '{}|{}'.format('DOCKER', custom_image_name)
     else:
         fx_version = ' '
@@ -402,6 +416,42 @@ def _delete_linux_fx_version(cmd, resource_group_name, name, slot=None):
 def _get_linux_fx_version(cmd, resource_group_name, name, slot=None):
     site_config = get_site_configs(cmd, resource_group_name, name, slot)
     return site_config.linux_fx_version
+
+
+def url_validator(url):
+    try:
+        result = urlparse(url)
+        return all([result.scheme, result.netloc, result.path])
+    except:
+        return False
+
+
+def _get_linux_multicontainer_config_file(cmd, resource_group_name, name, file_name=None, encoded=True, slot=None):
+    from base64 import b64encode, b64decode
+    config_file_bytes = None
+    if file_name:
+        if url_validator(file_name):
+            from urllib.request import urlopen
+            response = urlopen(file_name)
+            config_file_bytes = response.read()
+        else:
+            with open(file_name) as f:
+                file_contents = f.read()
+                config_file_bytes = file_contents.encode('utf-8')
+    else:
+        linux_fx_version = _get_linux_fx_version(cmd, resource_group_name, name, slot)
+        if not any([linux_fx_version.startswith(s) for s in MULTI_CONTAINER_TYPES]):
+            raise CLIError("Cannot decode config that is not one of the"
+                           " following types: {}".format(', '.join(MULTI_CONTAINER_TYPES)))
+        try:
+            config_file_bytes = b64decode(linux_fx_version.split('|')[1].encode('utf-8'))
+        except:
+            raise CLIError('Could not decode config')
+
+    if encoded:
+        return b64encode(config_file_bytes).decode('utf-8')
+
+    return config_file_bytes.decode('utf-8')
 
 
 # for any modifications to the non-optional parameters, adjust the reflection logic accordingly
@@ -528,7 +578,7 @@ APPSETTINGS_TO_MASK = ['DOCKER_REGISTRY_SERVER_PASSWORD']
 def update_container_settings(cmd, resource_group_name, name, docker_registry_server_url=None,
                               docker_custom_image_name=None, docker_registry_server_user=None,
                               websites_enable_app_service_storage=None, docker_registry_server_password=None,
-                              slot=None):
+                              multicontainer_config_type=None, multicontainer_config_file=None, slot=None):
     settings = []
     if docker_registry_server_url is not None:
         settings.append('DOCKER_REGISTRY_SERVER_URL=' + docker_registry_server_url)
@@ -555,6 +605,14 @@ def update_container_settings(cmd, resource_group_name, name, docker_registry_se
     if docker_registry_server_user or docker_registry_server_password or docker_registry_server_url or websites_enable_app_service_storage:  # pylint: disable=line-too-long
         update_app_settings(cmd, resource_group_name, name, settings, slot)
     settings = get_app_settings(cmd, resource_group_name, name, slot)
+
+    if bool(multicontainer_config_file) != bool(multicontainer_config_type):
+        encoded_config_file = _get_linux_multicontainer_config_file(cmd, resource_group_name,
+                                                                    name, multicontainer_config_file)
+        linux_fx_version = _format_linux_fx_version(encoded_config_file, multicontainer_config_type)
+        update_site_configs(cmd, resource_group_name, name, linux_fx_version=linux_fx_version)
+    else:
+        raise CLIError('Must use --multicontainer-config-file with --multicontainer-config-type')
 
     return _mask_creds_related_appsettings(_filter_for_container_settings(cmd, resource_group_name, name, settings))
 
@@ -585,19 +643,23 @@ def delete_container_settings(cmd, resource_group_name, name, slot=None):
     delete_app_settings(cmd, resource_group_name, name, CONTAINER_APPSETTING_NAMES, slot)
 
 
-def show_container_settings(cmd, resource_group_name, name, slot=None):
+def show_container_settings(cmd, resource_group_name, name, show_multicontainer_config=None, slot=None):
     settings = get_app_settings(cmd, resource_group_name, name, slot)
-    return _mask_creds_related_appsettings(_filter_for_container_settings(cmd, resource_group_name,
-                                                                          name, settings, slot))
+    return _mask_creds_related_appsettings(_filter_for_container_settings(cmd, resource_group_name, name, settings, show_multicontainer_config, slot))
 
 
-def _filter_for_container_settings(cmd, resource_group_name, name, settings, slot=None):
+def _filter_for_container_settings(cmd, resource_group_name, name, settings, show_multicontainer_config=None, slot=None):
     result = [x for x in settings if x['name'] in CONTAINER_APPSETTING_NAMES]
     fx_version = _get_linux_fx_version(cmd, resource_group_name, name, slot).strip()
     if fx_version:
         added_image_name = {'name': 'DOCKER_CUSTOM_IMAGE_NAME',
                             'value': fx_version}
         result.append(added_image_name)
+        if show_multicontainer_config:
+            decoded_value = _get_linux_multicontainer_config_file(cmd, resource_group_name, name, False, slot)
+            decoded_image_name = {'name': 'DOCKER_CUSTOM_IMAGE_NAME_DECODED',
+                                  'value': decoded_value}
+            result.append(decoded_image_name)
     return result
 
 
@@ -1258,27 +1320,20 @@ def clear_traffic_routing(cmd, resource_group_name, name):
     set_traffic_routing(cmd, resource_group_name, name, [])
 
 
-def get_streaming_log(cmd, resource_group_name, name, number_of_lines=None, provider=None,
-                      slot=None):
+def get_streaming_log(cmd, resource_group_name, name, provider=None, slot=None):
     scm_url = _get_scm_url(cmd, resource_group_name, name, slot)
     streaming_url = scm_url + '/logstream'
     import time
     if provider:
         streaming_url += ('/' + provider.lstrip('/'))
-    client = web_client_factory(cmd.cli_ctx)
-    user, password = _get_site_credential(cmd.cli_ctx, resource_group_name, name)
-    if number_of_lines:
-        webapp = client.web_apps.get(resource_group_name, name)
-        if not webapp.reserved:
-            raise CLIError('--number-of-lines is only supported for App Service on Linux apps')
-        url = scm_url + '/api/logs/docker'
-        _get_log(url, user, password, number_of_lines=number_of_lines)
-    else:
-        t = threading.Thread(target=_get_log, args=(streaming_url, user, password))
-        t.daemon = True
-        t.start()
-        while True:
-            time.sleep(100)  # so that ctrl+c can stop the command
+
+    user, password = _get_site_credential(cmd.cli_ctx, resource_group_name, name, slot)
+    t = threading.Thread(target=_get_log, args=(streaming_url, user, password))
+    t.daemon = True
+    t.start()
+
+    while True:
+        time.sleep(100)  # so that ctrl+c can stop the command
 
 
 def download_historical_logs(cmd, resource_group_name, name, log_file=None, slot=None):
@@ -1295,7 +1350,7 @@ def _get_site_credential(cli_ctx, resource_group_name, name, slot=None):
     return (creds.publishing_user_name, creds.publishing_password)
 
 
-def _get_log(url, user_name, password, log_file=None, number_of_lines=None):
+def _get_log(url, user_name, password, log_file=None):
     import sys
     import certifi
     import urllib3
@@ -1323,9 +1378,6 @@ def _get_log(url, user_name, password, log_file=None, number_of_lines=None):
                 if not data:
                     break
                 f.write(data)
-    elif number_of_lines:  # print last 'n' number of lines
-        api_str = r.read().decode(encoding='utf-8')
-        _print_site_logs(api_str, number_of_lines, 512000, http, headers)
     else:  # streaming
         std_encoding = sys.stdout.encoding
         for chunk in r.stream():
@@ -1335,47 +1387,6 @@ def _get_log(url, user_name, password, log_file=None, number_of_lines=None):
                       .encode(std_encoding, errors='replace')
                       .decode(std_encoding, errors='replace'), end='')  # each line of log has CRLF.
     r.release_conn()
-
-
-def _print_site_logs(api_string, number_of_lines, byte_limit, http, headers):
-    import sys
-    import json
-    std_encoding = sys.stdout.encoding
-
-    data = json.loads(api_string)
-    data_length = len(data)
-
-    if data_length > 1:
-        logger.info('Will show last %i lines of logs per instance', number_of_lines)
-
-    for x in range(0, data_length):
-        href_str = data[x]['href']
-        size = data[x]['size']
-        logger.info('\nSite Instance #%i', x + 1)
-        logger.info('\nUsing endpoint: %s', href_str)
-        byte_limit_exceeded = (int(size) > byte_limit)
-        if byte_limit_exceeded:
-            headers.update({'Range': 'bytes=-512000'})  # only get the last 512kB
-
-        r = http.request(
-            'GET',
-            href_str,
-            headers=headers,
-            preload_content=False
-        )
-        lines = (r.data.decode(encoding='utf-8', errors='replace')
-                 .encode(std_encoding, errors='replace')
-                 .decode(std_encoding, errors='replace')
-                 .replace('\\n', '\n'))
-        lines_split = lines.splitlines()
-        lines_split_length = len(lines_split)
-        if byte_limit_exceeded:
-            if lines_split_length < number_of_lines:
-                logger.warning("Hit internal limit of %s bytes."
-                               "Please download to see full logs", byte_limit)
-        number_of_lines = min(number_of_lines, lines_split_length)
-        last_n_lines = ('\n'.join(lines_split[-(number_of_lines)::])).lstrip('\n')
-        print(last_n_lines)
 
 
 def upload_ssl_cert(cmd, resource_group_name, name, certificate_password, certificate_file):
