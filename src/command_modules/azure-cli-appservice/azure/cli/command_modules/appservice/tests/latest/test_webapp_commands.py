@@ -10,6 +10,7 @@ import time
 import tempfile
 import requests
 
+from azure_devtools.scenario_tests import record_only
 from azure.cli.testsdk import (ScenarioTest, LiveScenarioTest, ResourceGroupPreparer,
                                StorageAccountPreparer, JMESPathCheck)
 
@@ -247,7 +248,8 @@ class WebappConfigureTest(ScenarioTest):
             JMESPathCheck('netFrameworkVersion', 'v4.0'),
             JMESPathCheck('pythonVersion', ''),
             JMESPathCheck('use32BitWorkerProcess', True),
-            JMESPathCheck('webSocketsEnabled', False)])
+            JMESPathCheck('webSocketsEnabled', False),
+            JMESPathCheck('minTlsVersion', '1.0')])
 
         # update and verify
         checks = [
@@ -257,11 +259,13 @@ class WebappConfigureTest(ScenarioTest):
             JMESPathCheck('netFrameworkVersion', 'v3.0'),
             JMESPathCheck('pythonVersion', '3.4'),
             JMESPathCheck('use32BitWorkerProcess', False),
-            JMESPathCheck('webSocketsEnabled', True)
+            JMESPathCheck('webSocketsEnabled', True),
+            JMESPathCheck('minTlsVersion', '1.2'),
+            JMESPathCheck('http20Enabled', True)
         ]
         self.cmd('webapp config set -g {} -n {} --always-on true --auto-heal-enabled true --php-version 7.0 '
                  '--net-framework-version v3.5 --python-version 3.4 --use-32bit-worker-process=false '
-                 '--web-sockets-enabled=true'.format(resource_group, webapp_name)).assert_with_checks(checks)
+                 '--web-sockets-enabled=true --http20-enabled true  --min-tls-version 1.2 '.format(resource_group, webapp_name)).assert_with_checks(checks)
         self.cmd('webapp config show -g {} -n {}'.format(resource_group, webapp_name)) \
             .assert_with_checks(checks)
 
@@ -516,6 +520,8 @@ class WebappSlotScenarioTest(ScenarioTest):
             JMESPathCheck("length([?name=='{}'])".format(slot), 1),
         ])
         self.cmd('webapp deployment slot delete -g {} -n {} --slot {}'.format(resource_group, webapp, slot))
+        # try another way to delete a slot and exercise all options
+        self.cmd('webapp delete -g {} -n {} --slot {} --keep-dns-registration --keep-empty-plan --keep-metrics'.format(resource_group, webapp, slot2))
 
 
 class WebappSlotTrafficRouting(ScenarioTest):
@@ -655,6 +661,7 @@ class WebappBackupConfigScenarioTest(ScenarioTest):
         ]
         self.cmd('webapp config backup show -g {} --webapp-name {}'.format(resource_group, webapp_name), checks=checks)
 
+    @record_only()  # to workaround https://github.com/Azure/azure-cli/issues/5369
     @ResourceGroupPreparer()
     def test_webapp_backup_restore(self, resource_group):
         webapp_name = self.create_random_name(prefix='azurecli-webapp-backuptest', length=36)
@@ -765,7 +772,6 @@ class WebappAuthenticationTest(ScenarioTest):
             JMESPathCheck('defaultProvider', None),
             JMESPathCheck('enabled', False),
             JMESPathCheck('tokenStoreEnabled', None),
-            JMESPathCheck('runtimeVersion', None),
             JMESPathCheck('allowedExternalRedirectUrls', None),
             JMESPathCheck('tokenRefreshExtensionHours', None),
             JMESPathCheck('clientId', None),
@@ -779,7 +785,7 @@ class WebappAuthenticationTest(ScenarioTest):
 
         # update and verify
         result = self.cmd('webapp auth update -g {} -n {} --enabled true --action LoginWithFacebook '
-                          '--token-store false --runtime-version v5.0 --token-refresh-extension-hours 7.2 '
+                          '--token-store false --token-refresh-extension-hours 7.2 '
                           '--aad-client-id aad_client_id --aad-client-secret aad_secret '
                           '--aad-allowed-token-audiences https://audience1 --aad-token-issuer-url https://issuer_url '
                           '--facebook-app-id facebook_id --facebook-app-secret facebook_secret '
@@ -789,7 +795,6 @@ class WebappAuthenticationTest(ScenarioTest):
                               JMESPathCheck('defaultProvider', 'Facebook'),
                               JMESPathCheck('enabled', True),
                               JMESPathCheck('tokenStoreEnabled', False),
-                              JMESPathCheck('runtimeVersion', 'v5.0'),
                               JMESPathCheck('tokenRefreshExtensionHours', 7.2),
                               JMESPathCheck('clientId', 'aad_client_id'),
                               JMESPathCheck('clientSecret', 'aad_secret'),

@@ -9,7 +9,7 @@ import time
 import unittest
 
 from azure_devtools.scenario_tests import AllowLargeResponse
-from azure.cli.testsdk import ScenarioTest, LiveScenarioTest, ResourceGroupPreparer, create_random_name
+from azure.cli.testsdk import ScenarioTest, LiveScenarioTest, ResourceGroupPreparer, create_random_name, live_only
 from azure.cli.core.util import get_file_json
 
 
@@ -357,7 +357,7 @@ class DeploymentThruUriTest(LiveScenarioTest):
         curr_dir = os.path.dirname(os.path.realpath(__file__))
         # same copy of the sample template file under current folder, but it is uri based now
         self.kwargs.update({
-            'tf': 'https://raw.githubusercontent.com/Azure/azure-cli/master/src/command_modules/azure-cli-resource/azure/cli/command_modules/resource/tests/simple_deploy.json',
+            'tf': 'https://raw.githubusercontent.com/Azure/azure-cli/dev/src/command_modules/azure-cli-resource/azure/cli/command_modules/resource/tests/latest/simple_deploy.json',
             'params': os.path.join(curr_dir, 'simple_deploy_parameters.json').replace('\\', '\\\\')
         })
         self.kwargs['dn'] = self.cmd('group deployment create -g {rg} --template-uri {tf} --parameters @{params}', checks=[
@@ -507,6 +507,8 @@ class PolicyScenarioTest(ScenarioTest):
         self.cmd('policy definition list',
                  checks=self.check("length([?name=='{pn}'])", 0))
 
+    # remove and re-record once issue #6008 is fixed
+    @live_only()
     @ResourceGroupPreparer(name_prefix='cli_test_policy')
     def test_resource_policyset(self, resource_group):
         curr_dir = os.path.dirname(os.path.realpath(__file__))

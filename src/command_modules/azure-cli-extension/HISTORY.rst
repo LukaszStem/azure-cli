@@ -3,9 +3,14 @@
 Release History
 ===============
 
+0.0.13
+++++++
+* Pin version of `wheel` so extensions can get metadata shown again.
+
 0.0.12
 ++++++
 * Linux distro check message should be output to debug instead of warning.
+* `sdist` is now compatible with wheel 0.31.0
 
 0.0.11
 ++++++

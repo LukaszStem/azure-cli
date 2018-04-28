@@ -3,8 +3,16 @@
 Release History
 ===============
 
+0.2.2
++++++
+* Now 'az batchai create cluster' respects vm priority configured in the cluster's configuration file.
+
+0.2.1
++++++
+* Minor fixes
+
 0.2.0
-++++++
++++++
 * Added support for 2018-03-01 API
 
  - Job level mounting
@@ -38,6 +46,7 @@ Release History
 * Breaking change: renamed --admin-user-name to --user-name in 'file-server create' command to be consistent with
   'cluster create' command.
 
+* `sdist` is now compatible with wheel 0.31.0
 
 0.1.4
 ++++++

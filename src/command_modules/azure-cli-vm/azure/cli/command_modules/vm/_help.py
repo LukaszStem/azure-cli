@@ -12,6 +12,11 @@ vm_ids_example = """        - name: {0}
             az {1} --ids $(az vm list -g MyResourceGroup --query "[].id" -o tsv)
 """
 
+helps['vm secret'] = """
+    type: group
+    short-summary: Manage VM secrets.
+"""
+
 helps['vm secret add'] = """
     type: command
     short-summary: Add a secret to a VM.
@@ -217,7 +222,7 @@ helps['vm extension set'] = """
 """
 
 helps['vm availability-set delete'] = """
-    type: command'
+    type: command
     short-summary: Delete an availability set.
     examples:
         - name: Delete an availability set.
